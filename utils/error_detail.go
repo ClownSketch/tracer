@@ -10,6 +10,19 @@ import (
 	"github.com/pkg/errors"
 )
 
+const unknownErrorCode = "unknown"
+
+// structuredError 描述 tracer 可以读取的结构化错误信息。
+// 宿主错误库只需实现这些方法，无需依赖 tracer。
+type structuredError interface {
+	Code() string
+	BusinessCode() string
+	BusinessMessage() []string
+	Metadata() map[string]any
+	StackError() error
+	HTTPCode() int
+}
+
 // CreateErrorDetail 创建错误详情
 func CreateErrorDetail(err error, customMessage string) *types.ErrorDetail {
 	// 判断 err 是否存在
@@ -22,34 +35,34 @@ func CreateErrorDetail(err error, customMessage string) *types.ErrorDetail {
 	var (
 		errMsg       = err.Error()                    // 获取错误消息
 		stackTrace   []types.StackFrame               // 初始化堆栈信息
-		code         = tracer.ErrorCodeUnknown        // 初始化错误码
+		code         = unknownErrorCode               // 初始化错误码
 		httpCode     = http.StatusInternalServerError // 初始化HTTP状态码
 		businessCode string                           // 初始化业务错误码
 		tipsMsg      = []string{customMessage}        // 初始化业务错误消息
 		metadata     map[string]any                   // 初始化元数据
 	)
 
-	// 如果是 ClownError，提取所有相关信息
-	if ce, ok := err.(tracer.ClownError); ok {
+	// 如果是结构化错误，提取可记录的业务信息
+	if structuredErr, ok := err.(structuredError); ok {
 
-		code = ce.Code()                 // 获取错误码
-		httpCode = ce.HTTPCode()         // 获取HTTP状态码
-		businessCode = ce.BusinessCode() // 获取业务错误码
-		tipsMsg = ce.BusinessMessage()   // 获取业务错误消息
-		metadata = ce.Metadata()         // 获取元数据
+		code = structuredErr.Code()                 // 获取错误码
+		httpCode = structuredErr.HTTPCode()         // 获取HTTP状态码
+		businessCode = structuredErr.BusinessCode() // 获取业务错误码
+		tipsMsg = structuredErr.BusinessMessage()   // 获取业务错误消息
+		metadata = structuredErr.Metadata()         // 获取元数据
 
 		// 获取堆栈信息
-		if stackErr := ce.StackError(); stackErr != nil {
+		if stackErr := structuredErr.StackError(); stackErr != nil {
 			// 获取堆栈错误消息
 			errMsg = stackErr.Error()
-			// 判断是否为 ClownError 类型
+			// 判断错误是否包含 pkg/errors 堆栈
 			if st, ok := stackErr.(interface{ StackTrace() errors.StackTrace }); ok {
 				// 转换堆栈信息
 				stackTrace = convertStackTrace(st.StackTrace())
 			}
 		}
 	} else {
-		// 对于非 ClownError，尝试获取堆栈信息
+		// 对于普通错误，尝试获取已有堆栈信息
 		if stackErr, ok := err.(interface{ StackTrace() errors.StackTrace }); ok {
 			// 转换堆栈信息
 			stackTrace = convertStackTrace(stackErr.StackTrace())
