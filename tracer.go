@@ -6,7 +6,7 @@
 //   - exporters receive a batch and write directly to the target backend
 //   - fallback is handled uniformly by the processor
 //
-// For practical usage, prefer providers.InitTracerE(...) and see:
+// For practical usage, prefer providers.InitTracer(...) and see:
 //   - README.md
 //   - API.md
 //   - https://pkg.go.dev/github.com/ClownSketch/tracer
@@ -476,10 +476,11 @@ type WALSpanProcessorOption = processor.WALSpanProcessorOption
 //
 // 返回值:
 //   - trace.SpanProcessor: Span 处理器实例
+//   - error: 初始化错误
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(
+//	processor, err := tracer.NewBatchSpanProcessor(
 //		exporter,
 //		tracer.WithBatchSize(100),
 //		tracer.WithWorkers(5),
@@ -487,16 +488,11 @@ type WALSpanProcessorOption = processor.WALSpanProcessorOption
 //		tracer.WithQueueSize(1000),
 //		tracer.WithFallbackDir("/tmp/tracer_fallback"),
 //	)
-//
-// Deprecated: 生产代码应使用 NewBatchSpanProcessorE 接收初始化错误。
-func NewBatchSpanProcessor(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) trace.SpanProcessor {
+//	if err != nil {
+//		return err
+//	}
+func NewBatchSpanProcessor(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) (trace.SpanProcessor, error) {
 	return processor.NewBatchSpanProcessor(exporter, opts...)
-}
-
-// NewBatchSpanProcessorE 创建批处理器并返回初始化错误。
-// 生产代码应使用该入口确保 fallback 目录错误在启动阶段暴露。
-func NewBatchSpanProcessorE(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) (trace.SpanProcessor, error) {
-	return processor.NewBatchSpanProcessorE(exporter, opts...)
 }
 
 // NewWALSpanProcessor 创建 WAL 主路径处理器。
@@ -519,7 +515,7 @@ func NewWALSpanProcessor(exporter trace.SyncSpanExporter, opts ...WALSpanProcess
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithBatchSize(500), // 高 QPS 场景
 //	)
 func WithBatchSize(batchSize int) BatchSpanProcessorOption {
@@ -539,7 +535,7 @@ func WithBatchSize(batchSize int) BatchSpanProcessorOption {
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithWorkers(10), // 5 核 CPU
 //	)
 func WithWorkers(workers int) BatchSpanProcessorOption {
@@ -559,7 +555,7 @@ func WithWorkers(workers int) BatchSpanProcessorOption {
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithFlushInterval(2*time.Second), // 2 秒刷新一次
 //	)
 func WithFlushInterval(interval time.Duration) BatchSpanProcessorOption {
@@ -579,7 +575,7 @@ func WithFlushInterval(interval time.Duration) BatchSpanProcessorOption {
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithQueueSize(10000), // 高并发场景
 //	)
 func WithQueueSize(size int) BatchSpanProcessorOption {
@@ -598,7 +594,7 @@ func WithQueueSize(size int) BatchSpanProcessorOption {
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithQueueSize(10000),
 //		tracer.WithQueueHighWaterMark(8000), // 80% 水位线
 //	)
@@ -619,7 +615,7 @@ func WithQueueHighWaterMark(highWaterMark int) BatchSpanProcessorOption {
 //
 // 示例:
 //
-//	processor := tracer.NewBatchSpanProcessor(exporter,
+//	processor, err := tracer.NewBatchSpanProcessor(exporter,
 //		tracer.WithFallbackDir("/tmp/tracer_fallback"),
 //	)
 func WithFallbackDir(dir string) BatchSpanProcessorOption {

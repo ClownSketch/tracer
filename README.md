@@ -55,7 +55,7 @@ import (
 )
 
 func main() {
-	provider, err := providers.InitTracerE(providers.TracerConfig{
+	provider, err := providers.InitTracer(providers.TracerConfig{
 		ServiceName:   "example-service",
 		ExporterType:  providers.ExporterTypeFile,
 		LogFile:       "./storage/log/traces.log",
@@ -92,7 +92,7 @@ func main() {
 }
 ```
 
-生产代码必须使用 `providers.InitTracerE()`。兼容入口 `providers.InitTracer()` 会在初始化失败时返回 no-op Provider，不适合作为生产启动门禁。
+`providers.InitTracer()` 是唯一的统一初始化入口。初始化失败会返回错误，宿主服务应根据自身启动策略决定终止启动或显式降级。
 
 ## 生产支持范围
 
@@ -102,11 +102,11 @@ func main() {
 | `mongodb` | 生产可用 | 固定集合存储 |
 | `mongodb_routing` | 生产可用 | 按 Span 路由到受控集合 |
 | `console` | 仅开发 | 终端调试 |
-| `jaeger` | 实验实现 | `InitTracerE` 拒绝生产初始化 |
-| `zipkin` | 实验实现 | `InitTracerE` 拒绝生产初始化 |
+| `jaeger` | 实验实现 | `InitTracer` 拒绝生产初始化 |
+| `zipkin` | 实验实现 | `InitTracer` 拒绝生产初始化 |
 | `otlp` | 实验实现 | 尚未进入统一生产初始化 |
 
-MongoDB 同时保留 Driver v1 和 v2 导出实现。统一 `providers.InitTracerE()` 当前使用 Driver v1；Driver v2 由显式构造器接入。
+MongoDB 同时保留 Driver v1 和 v2 导出实现。统一 `providers.InitTracer()` 当前使用 Driver v1；Driver v2 由显式构造器接入。
 
 ## 可靠性模式
 
@@ -146,6 +146,7 @@ router.Use(ginmiddleware.GinCrossServiceMiddleware())
 - [配置说明](./docs/configuration.md)
 - [Hook 接入](./docs/hooks.md)
 - [可靠性与运维](./docs/reliability.md)
+- [性能基线](./docs/performance.md)
 - [发布检查](./docs/release-checklist.md)
 
 ## 可运行示例

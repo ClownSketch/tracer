@@ -52,12 +52,12 @@ func setupPaymentRouteTracerWithProfile(t *testing.T, cfg paymentRoutePerfConfig
 		t.Fatalf("创建路由导出器失败: %v", err)
 	}
 
-	batchProcessor := processor.NewBatchSpanProcessor(routingExp,
+	batchProcessor := mustNewBatchSpanProcessor(t, routingExp,
 		processor.WithBatchSize(p.batchSize),
 		processor.WithWorkers(p.workers),
 		processor.WithFlushInterval(p.flushInterval),
 		processor.WithQueueSize(p.queueSize),
-	).(*processor.BatchSpanProcessor)
+	)
 
 	provider := providers.NewTracerProvider(
 		providers.WithSpanProcessor(batchProcessor),

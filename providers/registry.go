@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 
@@ -14,7 +14,6 @@ import (
 	"github.com/ClownSketch/tracer/processor"
 	"github.com/ClownSketch/tracer/sampler"
 	"github.com/ClownSketch/tracer/trace"
-	"github.com/ClownSketch/tracer/trace/noop"
 )
 
 var (
@@ -25,54 +24,99 @@ var (
 	exporterFactories = make(map[ExporterType]InternalExporterFactory)
 )
 
-// RegisterExporter 注册导出器工厂函数（泛型版本，类型安全）
-func RegisterExporter[T ExporterOption](factory RegisterExporterFactory[T]) {
-	factoryMu.Lock()         // 加锁
-	defer factoryMu.Unlock() // 解锁
+// RegisterExporter 注册导出器工厂。
+// option 只用于声明配置类型和导出器类型，不会作为运行时配置传给工厂。
+func RegisterExporter[T ExporterOption](option T, factory RegisterExporterFactory[T]) error {
+	if err := validateExporterOption(option); err != nil {
+		return fmt.Errorf("注册导出器失败: %w", err)
+	}
+	if factory == nil {
+		return errors.New("注册导出器失败: 工厂函数不能为空")
+	}
 
-	// 创建一个默认配置实例以获取类型
-	var zero T
-	exporterType := zero.ExporterType()
+	exporterType := option.ExporterType()
+	factoryMu.Lock()
+	defer factoryMu.Unlock()
 
-	// 将泛型工厂函数包装为内部工厂函数（类型擦除）
+	if _, exists := exporterFactories[exporterType]; exists {
+		return fmt.Errorf("注册导出器失败: 类型 %q 已注册", exporterType)
+	}
+
 	exporterFactories[exporterType] = func(opt ExporterOption) (trace.SpanExporter, error) {
-		// 将 opt 断言为具体类型 T
 		config, ok := opt.(T)
 		if !ok {
-			return nil, fmt.Errorf("配置类型不匹配: 期望 %T, 实际 %T", zero, opt)
+			return nil, fmt.Errorf("配置类型不匹配: 期望 %T, 实际 %T", option, opt)
 		}
-		// 调用泛型工厂函数
 		return factory(ExporterConfig[T]{
 			Type:    exporterType,
 			Options: config,
 		})
 	}
+	return nil
+}
+
+// mustRegisterExporter 注册内置导出器，注册失败表示程序定义冲突。
+func mustRegisterExporter[T ExporterOption](option T, factory RegisterExporterFactory[T]) {
+	if err := RegisterExporter(option, factory); err != nil {
+		panic(err)
+	}
+}
+
+// validateExporterOption 校验导出器配置是否可安全调用。
+func validateExporterOption(option ExporterOption) error {
+	if option == nil {
+		return errors.New("导出器配置不能为空")
+	}
+
+	value := reflect.ValueOf(option)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		if value.IsNil() {
+			return errors.New("导出器配置不能为空")
+		}
+	}
+
+	if option.ExporterType() == "" {
+		return errors.New("导出器类型不能为空")
+	}
+	return nil
 }
 
 // CreateExporter 创建导出器（泛型版本，类型安全）
 func CreateExporter[T ExporterOption](config ExporterConfig[T]) (trace.SpanExporter, error) {
-	factoryMu.RLock()         // 读取锁
-	defer factoryMu.RUnlock() // 读锁解锁
+	if err := validateExporterOption(config.Options); err != nil {
+		return nil, fmt.Errorf("创建导出器失败: %w", err)
+	}
+	optionType := config.Options.ExporterType()
+	if config.Type != optionType {
+		return nil, fmt.Errorf("创建导出器失败: 配置类型为 %q，选项类型为 %q", config.Type, optionType)
+	}
 
-	// 从映射中获取导出器工厂函数
+	// 只在读取工厂时持有锁，导出器初始化不占用注册表锁。
+	factoryMu.RLock()
 	factory, ok := exporterFactories[config.Type]
+	factoryMu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("导出器工厂函数未注册: %s", config.Type)
 	}
 
-	// 创建导出器（类型擦除调用）
+	// 使用已注册的工厂创建导出器。
 	return factory(config.Options)
 }
 
 // CreateExporterFromOption 从配置选项创建导出器（便捷方法）
 func CreateExporterFromOption[T ExporterOption](option T) (trace.SpanExporter, error) {
-	return CreateExporter(NewExporterConfig(option))
+	config, err := NewExporterConfig(option)
+	if err != nil {
+		return nil, err
+	}
+	return CreateExporter(config)
 }
 
 // 初始化注册导出器
 func init() {
 	// 注册控制台导出器（使用泛型配置）
-	RegisterExporter(func(config ExporterConfig[ConsoleExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(ConsoleExporterConfig{}, func(config ExporterConfig[ConsoleExporterConfig]) (trace.SpanExporter, error) {
 		// 初始化控制台导出选项
 		var opts []exporter.ConsoleExporterOption
 
@@ -108,7 +152,7 @@ func init() {
 	})
 
 	// 注册文件导出器（使用泛型配置）
-	RegisterExporter(func(config ExporterConfig[FileExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(FileExporterConfig{}, func(config ExporterConfig[FileExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 
 		// 初始化文件导出选项
@@ -144,7 +188,7 @@ func init() {
 	})
 
 	// 注册 Jaeger 导出器。
-	RegisterExporter(func(config ExporterConfig[JaegerExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(JaegerExporterConfig{}, func(config ExporterConfig[JaegerExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 		opts := make([]exporter.JaegerExporterOption, 0, 2)
 		if cfg.Timeout > 0 {
@@ -157,7 +201,7 @@ func init() {
 	})
 
 	// 注册 Zipkin 导出器。
-	RegisterExporter(func(config ExporterConfig[ZipkinExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(ZipkinExporterConfig{}, func(config ExporterConfig[ZipkinExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 		opts := make([]exporter.ZipkinExporterOption, 0, 2)
 		if cfg.Timeout > 0 {
@@ -170,7 +214,7 @@ func init() {
 	})
 
 	// 注册MongoDB导出器（使用泛型配置）
-	RegisterExporter(func(config ExporterConfig[MongoDBExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(MongoDBExporterConfig{}, func(config ExporterConfig[MongoDBExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 
 		// 初始化MongoDB导出器选项
@@ -246,7 +290,7 @@ func init() {
 	})
 
 	// 简化版和直连版配置统一复用当前 MongoDB 导出器实现。
-	RegisterExporter(func(config ExporterConfig[SimpleMongoDBExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(SimpleMongoDBExporterConfig{}, func(config ExporterConfig[SimpleMongoDBExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 		opts := make([]exporter.MongoDBExporterOption, 0, 1)
 		if cfg.Timeout > 0 {
@@ -254,7 +298,7 @@ func init() {
 		}
 		return exporter.NewMongoDBExporter(cfg.URI, cfg.Database, cfg.Collection, opts...)
 	})
-	RegisterExporter(func(config ExporterConfig[DirectMongoDBExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(DirectMongoDBExporterConfig{}, func(config ExporterConfig[DirectMongoDBExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 		opts := make([]exporter.MongoDBExporterOption, 0, 1)
 		if cfg.Timeout > 0 {
@@ -264,7 +308,7 @@ func init() {
 	})
 
 	// 注册 MongoDB 路由导出器（按 Span 集合名写入不同 collection）
-	RegisterExporter(func(config ExporterConfig[MongoDBRoutingExporterConfig]) (trace.SpanExporter, error) {
+	mustRegisterExporter(MongoDBRoutingExporterConfig{}, func(config ExporterConfig[MongoDBRoutingExporterConfig]) (trace.SpanExporter, error) {
 		cfg := config.Options
 
 		builderOpts := make([]exporter.MongoDBRoutingExporterOption, 0, 8)
@@ -324,19 +368,9 @@ func init() {
 	})
 }
 
-// InitTracer 初始化追踪器。
-// Deprecated: 生产代码应使用 InitTracerE 接收初始化错误。
-func InitTracer(config TracerConfig) trace.TracerProvider {
-	provider, err := InitTracerE(config)
-	if err == nil {
-		return provider
-	}
-	log.Printf("Tracer 初始化失败，已切换为空实现: %v", err)
-	return &noop.NoopTracerProvider{}
-}
-
-// InitTracerE 初始化追踪器并返回完整错误。
-func InitTracerE(config TracerConfig) (trace.TracerProvider, error) {
+// InitTracer 初始化追踪器并返回完整错误。
+// 调用方必须处理初始化错误，避免链路系统静默降级。
+func InitTracer(config TracerConfig) (trace.TracerProvider, error) {
 	primaryExporter, err := createConfiguredExporter(config)
 	if err != nil {
 		return nil, fmt.Errorf("创建 Tracer 导出器失败: %w", err)
@@ -362,9 +396,12 @@ func InitTracerE(config TracerConfig) (trace.TracerProvider, error) {
 	}
 	processors = append(processors, primaryProcessor)
 
-	samplerInstance := sampler.NewAlwaysSampleSampler()
-	if config.SampleRate > 0 && config.SampleRate < 1 {
-		samplerInstance = sampler.NewDistributedSampler(config.SampleRate)
+	samplerInstance, err := createConfiguredSampler(config.SampleRate)
+	if err != nil {
+		for _, proc := range processors {
+			_ = proc.Shutdown(context.Background())
+		}
+		return nil, err
 	}
 
 	opts := make([]TracerProviderOption, 0, len(processors)+2)
@@ -376,6 +413,17 @@ func InitTracerE(config TracerConfig) (trace.TracerProvider, error) {
 }
 
 func createConfiguredExporter(config TracerConfig) (trace.SpanExporter, error) {
+	if config.ExporterOption != nil {
+		if err := validateExporterOption(config.ExporterOption); err != nil {
+			return nil, fmt.Errorf("自定义导出器配置无效: %w", err)
+		}
+		exporterType := config.ExporterOption.ExporterType()
+		if config.ExporterType != "" && config.ExporterType != exporterType {
+			return nil, fmt.Errorf("导出器类型不一致: 配置为 %q，选项为 %q", config.ExporterType, exporterType)
+		}
+		return CreateExporterFromOption(config.ExporterOption)
+	}
+
 	switch config.ExporterType {
 	case "", ExporterTypeFile:
 		return CreateExporterFromOption(newFileExporterConfig(config))
@@ -406,6 +454,20 @@ func createConfiguredExporter(config TracerConfig) (trace.SpanExporter, error) {
 	default:
 		return nil, fmt.Errorf("不支持的导出器类型: %q", config.ExporterType)
 	}
+}
+
+// createConfiguredSampler 根据采样率创建采样器。
+func createConfiguredSampler(sampleRate float64) (trace.SpanSampler, error) {
+	if sampleRate < 0 || sampleRate > 1 {
+		return nil, fmt.Errorf("采样率必须在 0 到 1 之间，当前值为 %v", sampleRate)
+	}
+	if sampleRate == 0 {
+		return sampler.NewNeverSampler(), nil
+	}
+	if sampleRate == 1 {
+		return sampler.NewAlwaysSampleSampler(), nil
+	}
+	return sampler.NewDistributedSampler(sampleRate), nil
 }
 
 func createPrimaryProcessor(spanExporter trace.SpanExporter, config TracerConfig) (trace.SpanProcessor, error) {
@@ -445,7 +507,7 @@ func createPrimaryProcessor(spanExporter trace.SpanExporter, config TracerConfig
 		fallbackDir = "./storage/fallback"
 	}
 
-	batchProcessor, err := processor.NewBatchSpanProcessorE(
+	batchProcessor, err := processor.NewBatchSpanProcessor(
 		spanExporter,
 		processor.WithBatchSize(batchSize),
 		processor.WithWorkers(workers),

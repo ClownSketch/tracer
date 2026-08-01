@@ -4,10 +4,10 @@
 
 ## 1. 初始化
 
-### `providers.InitTracerE`
+### `providers.InitTracer`
 
 ```go
-func InitTracerE(config providers.TracerConfig) (trace.TracerProvider, error)
+func InitTracer(config providers.TracerConfig) (trace.TracerProvider, error)
 ```
 
 生产环境统一使用该入口。它会依次完成：
@@ -19,16 +19,12 @@ func InitTracerE(config providers.TracerConfig) (trace.TracerProvider, error)
 5. 在 fallback、WAL、MongoDB 或文件初始化失败时同步返回错误。
 
 ```go
-provider, err := providers.InitTracerE(config)
+provider, err := providers.InitTracer(config)
 if err != nil {
 	return fmt.Errorf("初始化 tracer: %w", err)
 }
 tracer.SetTracerProvider(provider, config.ServiceName)
 ```
-
-### `providers.InitTracer`
-
-兼容入口。初始化失败时记录错误并返回 no-op Provider。它不会把初始化失败反馈给调用者，生产服务不应使用。
 
 ### `tracer.SetTracerProvider`
 
@@ -218,7 +214,7 @@ if err := propagator.Inject(ctx, carrier); err != nil {
 ### Batch Processor
 
 ```go
-processor, err := tracer.NewBatchSpanProcessorE(
+processor, err := tracer.NewBatchSpanProcessor(
 	exporter,
 	tracer.WithBatchSize(100),
 	tracer.WithWorkers(4),
@@ -229,7 +225,7 @@ processor, err := tracer.NewBatchSpanProcessorE(
 )
 ```
 
-生产代码必须使用 `NewBatchSpanProcessorE`。旧的 `NewBatchSpanProcessor` 无法返回 fallback 初始化错误。
+`NewBatchSpanProcessor` 会返回 fallback 初始化错误，生产代码必须检查 `err`。
 
 如果需要运行状态，可以对 Processor 做具体类型断言：
 
@@ -285,12 +281,24 @@ func (MyConfig) ExporterType() providers.ExporterType {
 	return providers.ExporterType("my_exporter")
 }
 
-providers.RegisterExporter(func(cfg providers.ExporterConfig[MyConfig]) (trace.SpanExporter, error) {
+err := providers.RegisterExporter(MyConfig{}, func(cfg providers.ExporterConfig[MyConfig]) (trace.SpanExporter, error) {
 	return newMyExporter(cfg.Options)
 })
+if err != nil {
+	return err
+}
+
+provider, err := providers.InitTracer(providers.TracerConfig{
+	ServiceName:    "gateway",
+	SampleRate:     1,
+	ExporterOption: MyConfig{},
+})
+if err != nil {
+	return err
+}
 ```
 
-自定义 Exporter 需要自行编写批量写入、错误传播、重复关闭和并发测试。
+`ExporterOption` 设置后，`InitTracer` 会按照该选项返回的类型从注册表创建 Exporter。自定义 Exporter 需要自行编写批量写入、错误传播、重复关闭和并发测试。
 
 ## 10. Sampler
 
@@ -301,10 +309,11 @@ sampler.NewProbabilitySampler(0.1)
 sampler.NewDistributedSampler(0.1)
 ```
 
-`InitTracerE` 中：
+`InitTracer` 中：
 
 - `0 < SampleRate < 1` 使用 DistributedSampler。
-- 其他值使用 AlwaysSampleSampler。
+- `SampleRate = 0` 不采样，`SampleRate = 1` 全采样。
+- 超出 `0` 到 `1` 的采样率会导致初始化失败。
 - `WithForceRecord` 可以覆盖采样结果。
 
 ## 11. 可选 Hook

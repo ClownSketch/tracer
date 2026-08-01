@@ -2,7 +2,6 @@ package baggage
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/ClownSketch/tracer/attribute"
 )
@@ -10,23 +9,15 @@ import (
 // AttributeManager 定义属性管理器
 // 定义一个读优先的属性管理器
 type AttributeManager struct {
-	inheritableMu    sync.RWMutex // 继承属性读写锁，只保护写（copy-on-write）
-	inheritableAttrs atomic.Value // 继承属性 存 map[string]attribute.Attribute，使用atomic.Value 保证原子性
-	globalMu         sync.RWMutex // 全局属性读写锁，只保护写（copy-on-write）
-	globalAttrs      atomic.Value // 全局属性 存 map[string]attribute.Attribute，使用atomic.Value 保证原子性
+	inheritableMu    sync.RWMutex
+	inheritableAttrs map[string]attribute.Attribute
+	globalMu         sync.RWMutex
+	globalAttrs      map[string]attribute.Attribute
 }
 
 // NewAttributeManager 创建新的属性管理器
-// 初始化并存入空 map 快照
 func NewAttributeManager() attribute.AttributeManager {
-	bm := &AttributeManager{}
-	// 初始化并存入空 map 快照
-	bm.inheritableAttrs.Store(make(map[string]attribute.Attribute))
-	// 初始化并存入空 map 快照
-	bm.globalAttrs.Store(make(map[string]attribute.Attribute))
-
-	// 返回属性管理器
-	return bm
+	return &AttributeManager{}
 }
 
 // AddAttribute 添加属性，属性类型根据 config 进行定义
@@ -48,44 +39,20 @@ func (bm *AttributeManager) AddAttribute(key string, value attribute.Value, conf
 
 	// 根据属性类型进行添加
 	switch config.Type {
-	// 继承属性
 	case attribute.AttributeTypeInherited:
-		bm.inheritableMu.Lock()         // 加写锁
-		defer bm.inheritableMu.Unlock() // 解锁
-
-		// 获取私有属性 map 快照
-		old := bm.inheritableAttrs.Load().(map[string]attribute.Attribute)
-		// 创建新的 map，并复制旧的 map 数据
-		newMap := make(map[string]attribute.Attribute, len(old)+1)
-		// 遍历旧的 map，并复制数据到新的 map
-		for k, v := range old {
-			// 复制数据
-			newMap[k] = v
+		bm.inheritableMu.Lock()
+		if bm.inheritableAttrs == nil {
+			bm.inheritableAttrs = make(map[string]attribute.Attribute, 4)
 		}
-		// 添加新的属性
-		newMap[key] = attr
-		// 存入新的 map
-		bm.inheritableAttrs.Store(newMap)
-
-	// 全局属性
+		bm.inheritableAttrs[key] = attr
+		bm.inheritableMu.Unlock()
 	case attribute.AttributeTypeGlobal:
-		bm.globalMu.Lock()         // 加写锁
-		defer bm.globalMu.Unlock() // 解锁
-
-		// 获取私有属性 map 快照
-		old := bm.globalAttrs.Load().(map[string]attribute.Attribute)
-		// 创建新的 map，并复制旧的 map 数据
-		newMap := make(map[string]attribute.Attribute, len(old)+1)
-		// 遍历旧的 map，并复制数据到新的 map
-		for k, v := range old {
-			// 复制数据
-			newMap[k] = v
+		bm.globalMu.Lock()
+		if bm.globalAttrs == nil {
+			bm.globalAttrs = make(map[string]attribute.Attribute, 4)
 		}
-		// 添加新的属性
-		newMap[key] = attr
-		// 存入新的 map
-		bm.globalAttrs.Store(newMap)
-
+		bm.globalAttrs[key] = attr
+		bm.globalMu.Unlock()
 	}
 }
 
@@ -96,10 +63,7 @@ func (bm *AttributeManager) GetGlobalAttribute(key string) (attribute.Value, boo
 	bm.globalMu.RLock()         // 加读锁
 	defer bm.globalMu.RUnlock() // 解锁
 
-	// 获取全局属性 map 快照
-	old := bm.globalAttrs.Load().(map[string]attribute.Attribute)
-	// 获取属性
-	attr, ok := old[key]
+	attr, ok := bm.globalAttrs[key]
 	// 如果属性不存在，返回 false
 	if !ok {
 		return nil, false
@@ -111,16 +75,17 @@ func (bm *AttributeManager) GetGlobalAttribute(key string) (attribute.Value, boo
 // GetGlobalAttributes 获取全局属性
 // 这里返回的是一个拷贝，只读，防止外部修改
 func (bm *AttributeManager) GetGlobalAttributes() map[string]attribute.Attribute {
-	// 获取全局属性 map 快照
-	old := bm.globalAttrs.Load().(map[string]attribute.Attribute)
-	// 创建新的 map，并复制旧的 map 数据
-	newMap := make(map[string]attribute.Attribute, len(old))
-	// 遍历旧的 map，并复制数据到新的 map
-	for k, v := range old {
-		// 复制数据
+	bm.globalMu.RLock()
+	defer bm.globalMu.RUnlock()
+
+	if len(bm.globalAttrs) == 0 {
+		return nil
+	}
+
+	newMap := make(map[string]attribute.Attribute, len(bm.globalAttrs))
+	for k, v := range bm.globalAttrs {
 		newMap[k] = v
 	}
-	// 返回新的 map，只读，防止外部修改
 	return newMap
 }
 
@@ -131,10 +96,7 @@ func (bm *AttributeManager) GetInheritedAttribute(key string) (attribute.Value, 
 	bm.inheritableMu.RLock()         // 加读锁
 	defer bm.inheritableMu.RUnlock() // 解锁
 
-	// 获取继承属性 map 快照
-	old := bm.inheritableAttrs.Load().(map[string]attribute.Attribute)
-	// 获取属性
-	attr, ok := old[key]
+	attr, ok := bm.inheritableAttrs[key]
 	// 如果属性不存在，返回 false
 	if !ok {
 		return nil, false
@@ -146,16 +108,17 @@ func (bm *AttributeManager) GetInheritedAttribute(key string) (attribute.Value, 
 // GetInheritableAttributes 获取继承属性
 // 这里返回的是一个拷贝，只读，防止外部修改
 func (bm *AttributeManager) GetInheritableAttributes() map[string]attribute.Attribute {
-	// 获取继承属性 map 快照
-	old := bm.inheritableAttrs.Load().(map[string]attribute.Attribute)
-	// 创建新的 map，并复制旧的 map 数据
-	newMap := make(map[string]attribute.Attribute, len(old))
-	// 遍历旧的 map，并复制数据到新的 map
-	for k, v := range old {
-		// 复制数据
+	bm.inheritableMu.RLock()
+	defer bm.inheritableMu.RUnlock()
+
+	if len(bm.inheritableAttrs) == 0 {
+		return nil
+	}
+
+	newMap := make(map[string]attribute.Attribute, len(bm.inheritableAttrs))
+	for k, v := range bm.inheritableAttrs {
 		newMap[k] = v
 	}
-	// 返回新的 map，只读，防止外部修改
 	return newMap
 }
 
@@ -170,34 +133,22 @@ func (bm *AttributeManager) UpdateAttribute(key string, value attribute.Value, a
 	case attribute.AttributeTypeInherited:
 		bm.inheritableMu.Lock()
 		defer bm.inheritableMu.Unlock()
-		old := bm.inheritableAttrs.Load().(map[string]attribute.Attribute)
-		current, exists := old[key]
+		current, exists := bm.inheritableAttrs[key]
 		if !exists {
 			return false
 		}
-		next := make(map[string]attribute.Attribute, len(old))
-		for oldKey, oldValue := range old {
-			next[oldKey] = oldValue
-		}
 		current.Value = value
-		next[key] = current
-		bm.inheritableAttrs.Store(next)
+		bm.inheritableAttrs[key] = current
 		return true
 	case attribute.AttributeTypeGlobal:
 		bm.globalMu.Lock()
 		defer bm.globalMu.Unlock()
-		old := bm.globalAttrs.Load().(map[string]attribute.Attribute)
-		current, exists := old[key]
+		current, exists := bm.globalAttrs[key]
 		if !exists {
 			return false
 		}
-		next := make(map[string]attribute.Attribute, len(old))
-		for oldKey, oldValue := range old {
-			next[oldKey] = oldValue
-		}
 		current.Value = value
-		next[key] = current
-		bm.globalAttrs.Store(next)
+		bm.globalAttrs[key] = current
 		return true
 	default:
 		return false
@@ -215,32 +166,18 @@ func (bm *AttributeManager) RemoveAttribute(key string, attrType attribute.Attri
 	case attribute.AttributeTypeInherited:
 		bm.inheritableMu.Lock()
 		defer bm.inheritableMu.Unlock()
-		old := bm.inheritableAttrs.Load().(map[string]attribute.Attribute)
-		if _, exists := old[key]; !exists {
+		if _, exists := bm.inheritableAttrs[key]; !exists {
 			return false
 		}
-		next := make(map[string]attribute.Attribute, len(old)-1)
-		for oldKey, oldValue := range old {
-			if oldKey != key {
-				next[oldKey] = oldValue
-			}
-		}
-		bm.inheritableAttrs.Store(next)
+		delete(bm.inheritableAttrs, key)
 		return true
 	case attribute.AttributeTypeGlobal:
 		bm.globalMu.Lock()
 		defer bm.globalMu.Unlock()
-		old := bm.globalAttrs.Load().(map[string]attribute.Attribute)
-		if _, exists := old[key]; !exists {
+		if _, exists := bm.globalAttrs[key]; !exists {
 			return false
 		}
-		next := make(map[string]attribute.Attribute, len(old)-1)
-		for oldKey, oldValue := range old {
-			if oldKey != key {
-				next[oldKey] = oldValue
-			}
-		}
-		bm.globalAttrs.Store(next)
+		delete(bm.globalAttrs, key)
 		return true
 	default:
 		return false
@@ -252,20 +189,15 @@ func (bm *AttributeManager) RemoveAttribute(key string, attrType attribute.Attri
 // 如果属性类型存在，返回 true
 func (bm *AttributeManager) ResetType(attrType attribute.AttributeType) bool {
 	switch attrType {
-	// 继承属性
 	case attribute.AttributeTypeInherited:
-		bm.inheritableMu.Lock()         // 加写锁
-		defer bm.inheritableMu.Unlock() // 解锁
-		// 重置继承属性
-		bm.inheritableAttrs.Store(make(map[string]attribute.Attribute))
+		bm.inheritableMu.Lock()
+		clear(bm.inheritableAttrs)
+		bm.inheritableMu.Unlock()
 		return true
-
-	// 全局属性
 	case attribute.AttributeTypeGlobal:
-		bm.globalMu.Lock()         // 加写锁
-		defer bm.globalMu.Unlock() // 解锁
-		// 重置全局属性
-		bm.globalAttrs.Store(make(map[string]attribute.Attribute))
+		bm.globalMu.Lock()
+		clear(bm.globalAttrs)
+		bm.globalMu.Unlock()
 		return true
 	}
 	return false
@@ -273,13 +205,11 @@ func (bm *AttributeManager) ResetType(attrType attribute.AttributeType) bool {
 
 // ResetAll 重置属性管理器
 func (bm *AttributeManager) ResetAll() {
-	bm.inheritableMu.Lock()         // 加写锁
-	defer bm.inheritableMu.Unlock() // 解锁
-	bm.globalMu.Lock()              // 加写锁
-	defer bm.globalMu.Unlock()      // 解锁
+	bm.inheritableMu.Lock()
+	clear(bm.inheritableAttrs)
+	bm.inheritableMu.Unlock()
 
-	// 重置继承属性
-	bm.inheritableAttrs.Store(make(map[string]attribute.Attribute))
-	// 重置全局属性
-	bm.globalAttrs.Store(make(map[string]attribute.Attribute))
+	bm.globalMu.Lock()
+	clear(bm.globalAttrs)
+	bm.globalMu.Unlock()
 }

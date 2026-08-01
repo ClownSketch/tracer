@@ -13,6 +13,17 @@ import (
 	"github.com/ClownSketch/tracer/utils"
 )
 
+var (
+	defaultSuccessStatus = &types.SpanStatus{
+		Code:        types.StatusCodeOk,
+		Description: "SuccessFully",
+	}
+	defaultErrorStatus = &types.SpanStatus{
+		Code:        types.StatusCodeError,
+		Description: "服务发生异常，程序未执行完成",
+	}
+)
+
 // spanImpl 是对外暴露的 Span 句柄。
 // 句柄本身不再复用，避免 End 后旧引用误伤新 Span。
 type spanImpl struct {
@@ -27,6 +38,13 @@ type spanImpl struct {
 	state            atomic.Pointer[spanState]
 }
 
+// spanEvent 保存事件数据及其外层属性容器的所有权。
+// ownsAttributes 为 true 时，外层 map 和分组切片由 Tracer 创建，可直接移交给快照。
+type spanEvent struct {
+	event          types.SpanEvent
+	ownsAttributes bool
+}
+
 // spanState 是可复用的 Span 内部状态。
 // 只有这部分会进入对象池，避免对外句柄身份被复用。
 type spanState struct {
@@ -37,7 +55,7 @@ type spanState struct {
 	linkMu           sync.RWMutex                     // 关联 Span 读写锁
 	attributes       map[string]any                   // 属性
 	attrMu           sync.RWMutex                     // 属性读写锁
-	events           []types.SpanEvent                // 事件
+	events           []spanEvent                      // 事件
 	eventIndex       map[string]int                   // 事件索引
 	eventMu          sync.RWMutex                     // 事件读写锁
 	logs             []types.SpanLog                  // 日志
@@ -302,7 +320,8 @@ func (s *spanImpl) SetAttributeConfig(key string, value attribute.Value, opts ..
 		opt(config)
 	}
 
-	if config.Type != attribute.AttributeTypePrivate && state.attributeManager != nil {
+	if config.Type != attribute.AttributeTypePrivate {
+		state.ensureAttributeManager()
 		state.attributeManager.AddAttribute(key, value, *config)
 	}
 
@@ -384,9 +403,11 @@ func (s *spanImpl) GetGlobalAttributes() map[string]attribute.Attribute {
 	}
 	defer state.lifecycleMu.RUnlock()
 
-	state.ensureAttributeManager()
 	state.attrMu.RLock()
 	defer state.attrMu.RUnlock()
+	if state.attributeManager == nil {
+		return nil
+	}
 	return state.attributeManager.GetGlobalAttributes()
 }
 
@@ -434,9 +455,11 @@ func (s *spanImpl) GetInheritedAttributes() map[string]attribute.Attribute {
 	}
 	defer state.lifecycleMu.RUnlock()
 
-	state.ensureAttributeManager()
 	state.attrMu.RLock()
 	defer state.attrMu.RUnlock()
+	if state.attributeManager == nil {
+		return nil
+	}
 	return state.attributeManager.GetInheritableAttributes()
 }
 
@@ -490,9 +513,9 @@ func (s *spanImpl) AddEvent(name, eventType string, eventHandler types.Event) {
 	}
 
 	if state.events == nil {
-		evs, ok := eventSlicePool.Get().([]types.SpanEvent)
+		evs, ok := eventSlicePool.Get().([]spanEvent)
 		if !ok || evs == nil {
-			evs = make([]types.SpanEvent, 0, 5)
+			evs = make([]spanEvent, 0, 5)
 		}
 		state.events = evs
 	}
@@ -500,11 +523,13 @@ func (s *spanImpl) AddEvent(name, eventType string, eventHandler types.Event) {
 	if index, exists := state.eventIndex[name]; exists && index < len(state.events) {
 		event := &state.events[index]
 		if eventType == "" {
-			event.Attributes = eventData
+			event.event.Attributes = eventData
+			event.ownsAttributes = false
 		} else {
-			ops := event.Attributes
+			ops := event.event.Attributes
 			if ops == nil {
 				ops = make(map[string]any)
+				event.ownsAttributes = true
 			}
 			if attr, exists := ops[eventType]; exists {
 				if attrArray, ok := attr.([]any); ok {
@@ -515,27 +540,30 @@ func (s *spanImpl) AddEvent(name, eventType string, eventHandler types.Event) {
 			} else {
 				ops[eventType] = []any{eventData}
 			}
-			event.Attributes = ops
+			event.event.Attributes = ops
 		}
 		return
 	}
 
-	var ev types.SpanEvent
+	var event spanEvent
 	if eventType == "" {
-		ev = types.SpanEvent{
+		event.event = types.SpanEvent{
 			Name:       name,
 			Timestamp:  time.Now().Format(time.RFC3339),
 			Attributes: eventData,
 		}
 	} else {
-		ev = types.SpanEvent{
-			Name:       name,
-			Timestamp:  time.Now().Format(time.RFC3339),
-			Attributes: map[string]any{eventType: []any{eventData}},
+		event = spanEvent{
+			event: types.SpanEvent{
+				Name:       name,
+				Timestamp:  time.Now().Format(time.RFC3339),
+				Attributes: map[string]any{eventType: []any{eventData}},
+			},
+			ownsAttributes: true,
 		}
 	}
 
-	state.events = append(state.events, ev)
+	state.events = append(state.events, event)
 	state.eventIndex[name] = len(state.events) - 1
 }
 
@@ -547,14 +575,18 @@ func (s *spanImpl) GetEvents() (result []types.SpanEvent) {
 	}
 	defer state.lifecycleMu.RUnlock()
 
-	state.eventMu.RLock()
-	defer state.eventMu.RUnlock()
+	state.eventMu.Lock()
+	defer state.eventMu.Unlock()
 	if len(state.events) == 0 {
 		return nil
 	}
 
 	result = make([]types.SpanEvent, len(state.events))
-	copy(result, state.events)
+	for index := range state.events {
+		result[index] = state.events[index].event
+		// 返回值暴露了属性 map，结束时必须重新深拷贝，不能再直接移交。
+		state.events[index].ownsAttributes = false
+	}
 	return result
 }
 
@@ -777,10 +809,7 @@ func (s *spanImpl) checkSpanEndStatus(state *spanState) {
 
 	v := state.errorDetail.Load()
 	if errDetail, ok := v.(*types.ErrorDetail); ok && errDetail != nil {
-		state.status.Store(&types.SpanStatus{
-			Code:        types.StatusCodeError,
-			Description: "服务发生异常，程序未执行完成",
-		})
+		state.status.Store(defaultErrorStatus)
 		return
 	}
 
@@ -789,16 +818,10 @@ func (s *spanImpl) checkSpanEndStatus(state *spanState) {
 	for _, logEntry := range state.logs {
 		switch logEntry.Severity {
 		case types.SpanLogSeverityError, types.SpanLogSeverityFatal, types.SpanLogSeverityPanic:
-			state.status.Store(&types.SpanStatus{
-				Code:        types.StatusCodeError,
-				Description: "服务发生异常，程序未执行完成",
-			})
+			state.status.Store(defaultErrorStatus)
 			return
 		}
 	}
 
-	state.status.Store(&types.SpanStatus{
-		Code:        types.StatusCodeOk,
-		Description: "SuccessFully",
-	})
+	state.status.Store(defaultSuccessStatus)
 }

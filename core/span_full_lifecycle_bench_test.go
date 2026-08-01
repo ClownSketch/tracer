@@ -31,6 +31,19 @@ type mockExporter struct {
 	maxExportTime   int64 // 最大导出耗时（纳秒）
 }
 
+// benchmarkReleaseProcessor 同步释放快照，用于隔离 Core 生命周期成本。
+type benchmarkReleaseProcessor struct{}
+
+func (benchmarkReleaseProcessor) OnStart(context.Context, trace.Span) {}
+
+func (benchmarkReleaseProcessor) OnEnd(snapshot trace.SpanSnapshot) {
+	snapshot.Release()
+}
+
+func (benchmarkReleaseProcessor) Shutdown(context.Context) error {
+	return nil
+}
+
 func newMockExporter() *mockExporter {
 	return &mockExporter{
 		minExportTime: int64(^uint64(0) >> 1), // 初始化为最大值
@@ -81,6 +94,19 @@ func (m *mockExporter) ExportSpans(spans []trace.SpanSnapshot) error {
 
 func (m *mockExporter) Shutdown(ctx context.Context) error {
 	return nil
+}
+
+func mustNewBatchSpanProcessor(tb testing.TB, exporter trace.SpanExporter, opts ...processor.BatchSpanProcessorOption) *processor.BatchSpanProcessor {
+	tb.Helper()
+	spanProcessor, err := processor.NewBatchSpanProcessor(exporter, opts...)
+	if err != nil {
+		tb.Fatalf("创建批处理器失败: %v", err)
+	}
+	batchProcessor, ok := spanProcessor.(*processor.BatchSpanProcessor)
+	if !ok {
+		tb.Fatalf("批处理器类型错误: %T", spanProcessor)
+	}
+	return batchProcessor
 }
 
 func (m *mockExporter) getStats() (callCount, spanCount, avgTime, minTime, maxTime int64) {
@@ -200,10 +226,90 @@ func createFullLifecycleSpan(tracer trace.Tracer, spanName string) {
 
 // ==================== Benchmark Tests ====================
 
+// BenchmarkSpan_CoreLifecycle_Minimal 测量最小采样 Span 的创建、挂载、结束和快照释放成本。
+func BenchmarkSpan_CoreLifecycle_Minimal(b *testing.B) {
+	tracer := NewTracerImpl("core-minimal", nil, benchmarkReleaseProcessor{}, sampler.NewAlwaysSampleSampler())
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, span := tracer.Start(ctx, "benchmark-span")
+		span.End()
+	}
+}
+
+// BenchmarkSpan_CoreLifecycle_PrivateAttributes 测量常规私有属性的 Core 生命周期成本。
+func BenchmarkSpan_CoreLifecycle_PrivateAttributes(b *testing.B) {
+	tracer := NewTracerImpl("core-attributes", nil, benchmarkReleaseProcessor{}, sampler.NewAlwaysSampleSampler())
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, span := tracer.Start(ctx, "benchmark-span")
+		span.SetAttributes(
+			attribute.String("service.name", "payment-gateway"),
+			attribute.Int("merchant.id", 10001),
+			attribute.Bool("request.valid", true),
+		)
+		span.End()
+	}
+}
+
+// BenchmarkSpan_CoreLifecycle_PropagationAttributes 测量全局和继承属性管理成本。
+func BenchmarkSpan_CoreLifecycle_PropagationAttributes(b *testing.B) {
+	tracer := NewTracerImpl("core-propagation", nil, benchmarkReleaseProcessor{}, sampler.NewAlwaysSampleSampler())
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, span := tracer.Start(ctx, "benchmark-span")
+		span.SetGlobalAttributes(
+			attribute.String("environment", "production"),
+			attribute.String("region", "ap-south-1"),
+		)
+		span.SetInheritedAttributes(
+			attribute.String("merchant.no", "ME000001"),
+			attribute.String("request.no", "REQ000001"),
+		)
+		span.End()
+	}
+}
+
+// BenchmarkSpan_CoreLifecycle_EventAndLog 测量既有事件和日志载荷下的 Core 处理成本。
+func BenchmarkSpan_CoreLifecycle_EventAndLog(b *testing.B) {
+	tracer := NewTracerImpl("core-event-log", nil, benchmarkReleaseProcessor{}, sampler.NewAlwaysSampleSampler())
+	ctx := context.Background()
+	eventPayload := map[string]any{
+		"operation": "GET",
+		"success":   true,
+	}
+	logFields := map[string]any{
+		"stage": "completed",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, span := tracer.Start(ctx, "benchmark-span")
+		span.AddEvent("redis.operation", "redis", func() map[string]any {
+			return eventPayload
+		})
+		span.AddLog(types.SpanLog{
+			Severity: types.SpanLogSeverityInfo,
+			Message:  "request completed",
+			Fields:   logFields,
+		})
+		span.End()
+	}
+}
+
 // BenchmarkSpan_FullLifecycle 基准测试：完整 Span 生命周期（单个）
 func BenchmarkSpan_FullLifecycle(b *testing.B) {
 	exporter := newMockExporter()
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(b, exporter,
 		processor.WithBatchSize(100),
 		processor.WithWorkers(5),
 		processor.WithFlushInterval(2*time.Second),
@@ -224,7 +330,7 @@ func BenchmarkSpan_FullLifecycle(b *testing.B) {
 // BenchmarkSpan_FullLifecycle_Parallel 基准测试：完整 Span 生命周期（高并发）
 func BenchmarkSpan_FullLifecycle_Parallel(b *testing.B) {
 	exporter := newMockExporter()
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(b, exporter,
 		processor.WithBatchSize(500),
 		processor.WithWorkers(10),
 		processor.WithFlushInterval(1*time.Second),
@@ -250,7 +356,7 @@ var spanIDCounter int64
 // BenchmarkSpan_FullLifecycle_HighConcurrency 基准测试：极端高并发场景
 func BenchmarkSpan_FullLifecycle_HighConcurrency(b *testing.B) {
 	exporter := newMockExporter()
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(b, exporter,
 		processor.WithBatchSize(1000),
 		processor.WithWorkers(20),
 		processor.WithFlushInterval(500*time.Millisecond),
@@ -292,7 +398,7 @@ func BenchmarkSpan_CreationOnly(b *testing.B) {
 // BenchmarkSpan_EndOnly 基准测试：仅测试 Span 结束（包含快照创建）
 func BenchmarkSpan_EndOnly(b *testing.B) {
 	exporter := newMockExporter()
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(b, exporter,
 		processor.WithBatchSize(100),
 		processor.WithWorkers(5),
 		processor.WithFlushInterval(2*time.Second),
@@ -508,12 +614,12 @@ func TestSpan_FullLifecycle_Performance(t *testing.T) {
 	for _, cfg := range configs {
 		t.Run(cfg.name, func(t *testing.T) {
 			exporter := newMockExporter()
-			batchProcessor := processor.NewBatchSpanProcessor(exporter,
+			batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 				processor.WithBatchSize(cfg.batchSize),
 				processor.WithWorkers(cfg.workers),
 				processor.WithFlushInterval(cfg.flushInterval),
 				processor.WithQueueSize(cfg.queueSize),
-			).(*processor.BatchSpanProcessor)
+			)
 			defer batchProcessor.Shutdown(context.Background())
 
 			tracer := NewTracerImpl("test", nil, batchProcessor, sampler.NewAlwaysSampleSampler())
@@ -672,12 +778,12 @@ func TestSpan_FullLifecycle_StressTest(t *testing.T) {
 	}
 
 	exporter := newMockExporter()
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 		processor.WithBatchSize(1000),
 		processor.WithWorkers(20),
 		processor.WithFlushInterval(500*time.Millisecond),
 		processor.WithQueueSize(10000),
-	).(*processor.BatchSpanProcessor)
+	)
 	defer batchProcessor.Shutdown(context.Background())
 
 	tracer := NewTracerImpl("test", nil, batchProcessor, sampler.NewAlwaysSampleSampler())

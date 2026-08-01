@@ -80,9 +80,22 @@ func (e *shutdownDrainExporter) Shutdown(context.Context) error {
 	return nil
 }
 
+func mustNewBatchSpanProcessor(tb testing.TB, exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) *BatchSpanProcessor {
+	tb.Helper()
+	spanProcessor, err := NewBatchSpanProcessor(exporter, opts...)
+	if err != nil {
+		tb.Fatalf("创建批处理器失败: %v", err)
+	}
+	batchProcessor, ok := spanProcessor.(*BatchSpanProcessor)
+	if !ok {
+		tb.Fatalf("批处理器类型错误: %T", spanProcessor)
+	}
+	return batchProcessor
+}
+
 func TestBatchSpanProcessor_OverloadDoesNotLoseSpans(t *testing.T) {
 	exporter := &batchTestExporter{delay: time.Millisecond}
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		exporter,
 		WithQueueSize(8),
 		WithQueueHighWaterMark(6),
@@ -90,7 +103,7 @@ func TestBatchSpanProcessor_OverloadDoesNotLoseSpans(t *testing.T) {
 		WithWorkers(1),
 		WithFlushInterval(10*time.Millisecond),
 		WithFallbackDir(t.TempDir()),
-	).(*BatchSpanProcessor)
+	)
 
 	const total = 2000
 	for index := 0; index < total; index++ {
@@ -115,11 +128,11 @@ func TestBatchSpanProcessor_OverloadDoesNotLoseSpans(t *testing.T) {
 }
 
 func TestBatchSpanProcessor_HighWaterMarkDoesNotResizeQueue(t *testing.T) {
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		&batchTestExporter{},
 		WithQueueSize(100),
 		WithQueueHighWaterMark(80),
-	).(*BatchSpanProcessor)
+	)
 	defer batchProcessor.Shutdown(context.Background())
 
 	if batchProcessor.GetMaxQueueSize() != 100 {
@@ -128,7 +141,7 @@ func TestBatchSpanProcessor_HighWaterMarkDoesNotResizeQueue(t *testing.T) {
 }
 
 func TestBatchSpanProcessor_ReleasesSpanAfterShutdown(t *testing.T) {
-	batchProcessor := NewBatchSpanProcessor(&batchTestExporter{}).(*BatchSpanProcessor)
+	batchProcessor := mustNewBatchSpanProcessor(t, &batchTestExporter{})
 	if err := batchProcessor.Shutdown(context.Background()); err != nil {
 		t.Fatalf("关闭批处理器失败: %v", err)
 	}
@@ -148,7 +161,7 @@ func TestBatchSpanProcessor_ReleasesSpanAfterShutdown(t *testing.T) {
 }
 
 func TestBatchSpanProcessor_DropsWithoutBlockingWhenAllOutputsFail(t *testing.T) {
-	batchProcessor := NewBatchSpanProcessor(nil).(*BatchSpanProcessor)
+	batchProcessor := mustNewBatchSpanProcessor(t, nil)
 	batchProcessor.fallback = &failingFallbackWriter{}
 
 	released := atomic.Int64{}
@@ -184,10 +197,10 @@ func TestBatchSpanProcessor_DropsWithoutBlockingWhenAllOutputsFail(t *testing.T)
 
 func TestBatchSpanProcessor_DropsOnlyInvalidFallbackSpan(t *testing.T) {
 	primaryExporter := &batchTestExporter{}
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		primaryExporter,
 		WithFallbackDir(t.TempDir()),
-	).(*BatchSpanProcessor)
+	)
 
 	goodReleased := atomic.Int64{}
 	goodSpan := mock.NewSpanSnapshotMock(1)
@@ -228,10 +241,10 @@ func TestBatchSpanProcessor_DropsOnlyInvalidFallbackSpan(t *testing.T) {
 
 func TestBatchSpanProcessor_DropsOnlyOversizedFallbackSpan(t *testing.T) {
 	primaryExporter := &batchTestExporter{}
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		primaryExporter,
 		WithFallbackDir(t.TempDir()),
-	).(*BatchSpanProcessor)
+	)
 	batchProcessor.fallback.(*fallbackWriter).maxRecordSize = 1024
 
 	goodSpan := mock.NewSpanSnapshotMock(1)
@@ -263,13 +276,13 @@ func TestBatchSpanProcessor_ShutdownDrainsAcceptedQueue(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		exporter,
 		WithQueueSize(128),
 		WithBatchSize(1),
 		WithWorkers(1),
 		WithFlushInterval(time.Hour),
-	).(*BatchSpanProcessor)
+	)
 
 	const total = 64
 	for index := 0; index < total; index++ {
@@ -311,13 +324,13 @@ func TestBatchSpanProcessor_ShutdownContinuesAfterCallerTimeout(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	batchProcessor := NewBatchSpanProcessor(
+	batchProcessor := mustNewBatchSpanProcessor(t,
 		exporter,
 		WithQueueSize(8),
 		WithBatchSize(1),
 		WithWorkers(1),
 		WithFlushInterval(time.Hour),
-	).(*BatchSpanProcessor)
+	)
 	batchProcessor.OnEnd(mock.NewSpanSnapshotMock(1))
 
 	select {

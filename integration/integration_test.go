@@ -18,13 +18,30 @@ import (
 	"github.com/ClownSketch/tracer/types"
 )
 
+// mustNewBatchSpanProcessor 创建测试使用的批处理器，初始化失败时立即终止当前测试。
+func mustNewBatchSpanProcessor(tb testing.TB, exporter trace.SpanExporter, opts ...processor.BatchSpanProcessorOption) *processor.BatchSpanProcessor {
+	tb.Helper()
+
+	spanProcessor, err := processor.NewBatchSpanProcessor(exporter, opts...)
+	if err != nil {
+		tb.Fatalf("创建批处理器失败: %v", err)
+	}
+
+	batchProcessor, ok := spanProcessor.(*processor.BatchSpanProcessor)
+	if !ok {
+		tb.Fatalf("批处理器类型错误: %T", spanProcessor)
+	}
+
+	return batchProcessor
+}
+
 // TestIntegration_FullLifecycle 集成测试：完整生命周期
 func TestIntegration_FullLifecycle(t *testing.T) {
 	// 创建mock导出器
 	exporter := newMockExporter()
 
 	// 创建批处理器
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 		processor.WithBatchSize(100),
 		processor.WithWorkers(5),
 		processor.WithFlushInterval(2*time.Second),
@@ -88,7 +105,7 @@ func TestIntegration_ConcurrentSpans(t *testing.T) {
 	exporter := newMockExporter()
 
 	// 创建批处理器
-	batchProcessor := processor.NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 		processor.WithBatchSize(100),
 		processor.WithWorkers(10),
 		processor.WithFlushInterval(1*time.Second),

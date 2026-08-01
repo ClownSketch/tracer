@@ -24,7 +24,7 @@ func main() {
 		log.Fatal("必须设置 MONGO_URI")
 	}
 
-	provider, err := providers.InitTracerE(providers.TracerConfig{
+	provider, err := providers.InitTracer(providers.TracerConfig{
 		ServiceName:       "tracer-gin-example",
 		ExporterType:      providers.ExporterTypeMongoDB,
 		SampleRate:        1,

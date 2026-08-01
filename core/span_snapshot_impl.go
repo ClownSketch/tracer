@@ -27,6 +27,7 @@ type snapshotImpl struct {
 	resourceUsage    *types.ResourceMetrics     // 资源使用情况
 	attributeManager attribute.AttributeManager // 属性管理器
 	mongoCollection  string                     // MongoDB 导出目标集合名
+	buffers          *snapshotBuffers           // 快照内部容器，Release 后归还对象池
 }
 
 // 创建快照信息
@@ -67,31 +68,35 @@ func createSnapshotInfo(span *spanImpl, state *spanState) *snapshotImpl {
 
 	// return snap
 
-	// 先准备目标容器，从池里拿
-	attr := snapAttrMapPool.Get().(map[string]any)
+	// 获取快照内部容器。
+	buffers := snapshotBufferPool.Get().(*snapshotBuffers)
+	attr := buffers.attributes
 	// 清空残留（以防上次复用留下旧键）
 	if len(attr) > 0 {
 		clear(attr)
 	}
 
-	// 从池中获取事件缓冲池
-	events := *snapEventSlicePool.Get().(*[]types.SpanEvent)
+	// 重置事件缓冲区。
+	events := buffers.events
 	// 清空残留（以防上次复用留下旧键）
 	if len(events) > 0 {
+		clear(events)
 		events = events[:0]
 	}
 
-	// 从池中获取日志缓冲池
-	logs := *snapLogSlicePool.Get().(*[]types.SpanLog)
+	// 重置日志缓冲区。
+	logs := buffers.logs
 	// 清空残留（以防上次复用留下旧键）
 	if len(logs) > 0 {
+		clear(logs)
 		logs = logs[:0]
 	}
 
-	// 从池中获取关联 Span 缓冲池
-	links := *snapLinkSlicePool.Get().(*[]types.SpanContext)
+	// 重置关联 Span 缓冲区。
+	links := buffers.linkedSpans
 	// 清空残留（以防上次复用留下旧键）
 	if len(links) > 0 {
+		clear(links)
 		links = links[:0]
 	}
 
@@ -107,13 +112,13 @@ func createSnapshotInfo(span *spanImpl, state *spanState) *snapshotImpl {
 	state.attrMu.RUnlock()
 
 	// 复制事件副本
-	state.eventMu.RLock() // 加读锁
+	state.eventMu.Lock()
 	if len(state.events) > 0 {
 		for _, event := range state.events {
 			events = append(events, cloneSpanEvent(event))
 		}
 	}
-	state.eventMu.RUnlock() // 解锁
+	state.eventMu.Unlock()
 
 	// 复制日志副本
 	state.logMu.RLock()
@@ -184,17 +189,41 @@ func createSnapshotInfo(span *spanImpl, state *spanState) *snapshotImpl {
 		resource:         resInfo,
 		resourceUsage:    resUsage,
 		mongoCollection:  mongoCollection,
+		buffers:          buffers,
 	}
 
 	return snap
 }
 
-func cloneSpanEvent(event types.SpanEvent) types.SpanEvent {
-	return types.SpanEvent{
-		Name:       event.Name,
-		Timestamp:  event.Timestamp,
-		Attributes: cloneMapStringAny(event.Attributes),
+func cloneSpanEvent(event spanEvent) types.SpanEvent {
+	if event.ownsAttributes {
+		return types.SpanEvent{
+			Name:       event.event.Name,
+			Timestamp:  event.event.Timestamp,
+			Attributes: cloneOwnedEventAttributes(event.event.Attributes),
+		}
 	}
+
+	return types.SpanEvent{
+		Name:       event.event.Name,
+		Timestamp:  event.event.Timestamp,
+		Attributes: cloneMapStringAny(event.event.Attributes),
+	}
+}
+
+// cloneOwnedEventAttributes 移交 Tracer 创建的外层容器，仅复制调用方提供的可变载荷。
+func cloneOwnedEventAttributes(attributes map[string]any) map[string]any {
+	for key, value := range attributes {
+		if items, ok := value.([]any); ok {
+			for index, item := range items {
+				items[index] = cloneSnapshotValue(item)
+			}
+			attributes[key] = items
+			continue
+		}
+		attributes[key] = cloneSnapshotValue(value)
+	}
+	return attributes
 }
 
 func cloneSpanLog(log types.SpanLog) types.SpanLog {
@@ -415,54 +444,24 @@ func releaseSnapshotResources(snap *snapshotImpl) {
 		return
 	}
 
-	// 清空属性数据并返回池内
-	if snap.attributes != nil {
-		// 循环删除属性映射
-		for k := range snap.attributes {
-			// 删除属性映射
-			delete(snap.attributes, k)
-		}
-		// 返回池内
-		snapAttrMapPool.Put(snap.attributes)
-		// 清空属性映射
-		snap.attributes = nil
-	}
+	// 清空快照持有的数据，并把内部容器作为一个整体归还对象池。
+	if snap.buffers != nil {
+		clear(snap.attributes)
+		clear(snap.events)
+		clear(snap.logs)
+		clear(snap.linkedSpans)
 
-	// 如果事件列表不为空，则清空事件列表并返回池内
-	if snap.events != nil {
-		for i := range snap.events {
-			snap.events[i] = types.SpanEvent{}
-		}
-		events := snap.events[:0]
-		// 返回池内
-		snapEventSlicePool.Put(&events)
-		// 清空事件列表
-		snap.events = nil // 清空事件列表
+		snap.buffers.attributes = snap.attributes
+		snap.buffers.events = snap.events[:0]
+		snap.buffers.logs = snap.logs[:0]
+		snap.buffers.linkedSpans = snap.linkedSpans[:0]
+		snapshotBufferPool.Put(snap.buffers)
+		snap.buffers = nil
 	}
-
-	// 如果日志列表不为空，则清空日志列表并返回池内
-	if snap.logs != nil {
-		for i := range snap.logs {
-			snap.logs[i] = types.SpanLog{}
-		}
-		logs := snap.logs[:0]
-		// 返回池内
-		snapLogSlicePool.Put(&logs)
-		// 清空日志列表
-		snap.logs = nil
-	}
-
-	// linked spans
-	if snap.linkedSpans != nil {
-		for i := range snap.linkedSpans {
-			snap.linkedSpans[i] = types.SpanContext{}
-		}
-		links := snap.linkedSpans[:0]
-		// 返回池内
-		snapLinkSlicePool.Put(&links)
-		// 清空关联 Span 列表
-		snap.linkedSpans = nil
-	}
+	snap.attributes = nil
+	snap.events = nil
+	snap.logs = nil
+	snap.linkedSpans = nil
 
 	// 清空错误详情
 	snap.errorDetail = nil

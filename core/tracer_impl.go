@@ -137,7 +137,6 @@ func (t *tracerImpl) Start(ctx context.Context, spanName string, options ...type
 	spanState := span.loadState()
 	spanState.tracerImpl = t // 设置当前Span的所属追踪器
 	spanState.forceRecord.Store(recordPolicy)
-	spanState.ensureAttributeManager() // 初始化属性管理器
 	if t.resource != nil {
 		spanState.resource.Store(cloneResourceInfo(t.resource))
 	}

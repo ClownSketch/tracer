@@ -5,11 +5,12 @@
 | 字段 | 默认值 | 说明 |
 |---|---:|---|
 | `ServiceName` | 空 | 服务名称，应显式设置 |
-| `SampleRate` | 全采样 | `0 < value < 1` 时使用分布式概率采样 |
+| `SampleRate` | `0` | `0` 不采样，`0 < value < 1` 使用分布式采样，`1` 全采样 |
 | `IsDebug` | `false` | 在主 Processor 外增加 Console SimpleProcessor |
 | `ExporterType` | `file` | 主 Exporter 类型 |
 
 生产环境建议固定服务名称，避免同一实例运行期间变化。
+`SampleRate` 必须位于 `0` 到 `1` 之间，超出范围会导致 `InitTracer` 初始化失败。
 
 ## 2. Batch Processor
 

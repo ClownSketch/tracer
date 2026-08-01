@@ -66,6 +66,10 @@ go test ./exporter \
 
 ```bash
 go test ./core \
+  -run '^$' -bench '^BenchmarkSpan_CoreLifecycle_' \
+  -benchmem -benchtime=3s -count=3
+
+go test ./core \
   -run '^$' -bench '^BenchmarkSpan_FullLifecycle_Parallel$' \
   -benchmem -benchtime=3s -count=3
 
@@ -105,3 +109,7 @@ TRACER_STRESS_TESTS=1 go test ./core ./processor \
 - 高并发结果没有 Span 缺失。
 - 依赖漏洞检查没有已知高危问题。
 - README、API 和示例与当前公开接口一致。
+- 自定义 Exporter 的值配置、指针配置和重复注册测试通过。
+- `NewBatchSpanProcessor` 初始化错误能够返回给调用方。
+- 分层基准与 [性能基线](./performance.md) 相比没有无法解释的明显退化。
+- GitHub Actions 的质量、Race 和 MongoDB 真库任务全部通过。

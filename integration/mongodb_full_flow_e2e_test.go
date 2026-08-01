@@ -55,33 +55,29 @@ func TestMongoDBExporter_FullFlowE2E(t *testing.T) {
 	collection := verifyClient.Database(cfg.Database).Collection(cfg.Collection)
 	defer cleanupMongoRunDocuments(t, collection, cfg.RunID)
 
-	exp, err := exporter.NewMongoDBExporter(
-		cfg.URI,
-		cfg.Database,
-		cfg.Collection,
-		exporter.WithMongoDBBatchSize(20),
-		exporter.WithMongoDBFlushInterval(150*time.Millisecond),
-		exporter.WithMongoDBQueueSize(4000),
-		exporter.WithMongoDBMaxConcurrentWrites(8),
-		exporter.WithMongoDBTimeout(10*time.Second),
-		exporter.WithMongoDBRetries(3, 200*time.Millisecond),
-	)
+	provider, err := providers.InitTracer(providers.TracerConfig{
+		ServiceName:                "mongo-e2e-service",
+		SampleRate:                 1,
+		BatchSize:                  20,
+		BatchInterval:              150 * time.Millisecond,
+		Workers:                    8,
+		QueueSize:                  4000,
+		FallbackDir:                t.TempDir(),
+		ExporterType:               providers.ExporterTypeMongoDB,
+		MongoDBURI:                 cfg.URI,
+		MongoDBDatabase:            cfg.Database,
+		MongoDBCollection:          cfg.Collection,
+		MongoDBBatchSize:           20,
+		MongoDBFlushInterval:       150 * time.Millisecond,
+		MongoDBQueueSize:           4000,
+		MongoDBMaxConcurrentWrites: 8,
+		MongoDBTimeout:             10 * time.Second,
+		MongoDBMaxRetries:          3,
+		MongoDBRetryDelay:          200 * time.Millisecond,
+	})
 	if err != nil {
-		t.Fatalf("创建 MongoDBExporter 失败: %v", err)
+		t.Fatalf("通过 InitTracer 初始化 MongoDB 链路失败: %v", err)
 	}
-
-	batchProcessor := processor.NewBatchSpanProcessor(
-		exp,
-		processor.WithBatchSize(20),
-		processor.WithWorkers(8),
-		processor.WithFlushInterval(150*time.Millisecond),
-		processor.WithQueueSize(4000),
-	)
-
-	provider := providers.NewTracerProvider(
-		providers.WithSpanProcessor(batchProcessor),
-		providers.WithSampler(sampler.NewAlwaysSampleSampler()),
-	)
 
 	previousProvider := tracerpkg.GetTracerProvider()
 	tracerpkg.SetTracerProvider(provider, "default")

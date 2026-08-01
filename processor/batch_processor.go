@@ -118,16 +118,9 @@ func WithFallbackDir(dir string) BatchSpanProcessorOption {
 	}
 }
 
-// NewBatchSpanProcessor 创建批处理器。
-// Deprecated: 生产代码应使用 NewBatchSpanProcessorE 接收初始化错误。
-func NewBatchSpanProcessor(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) trace.SpanProcessor {
-	spanProcessor, _ := NewBatchSpanProcessorE(exporter, opts...)
-	return spanProcessor
-}
-
-// NewBatchSpanProcessorE 创建批处理器并返回初始化错误。
+// NewBatchSpanProcessor 创建批处理器并返回初始化错误。
 // fallback 目录不可用时不会启动后台协程。
-func NewBatchSpanProcessorE(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) (trace.SpanProcessor, error) {
+func NewBatchSpanProcessor(exporter trace.SpanExporter, opts ...BatchSpanProcessorOption) (trace.SpanProcessor, error) {
 	processor := &BatchSpanProcessor{
 		exporter:           exporter,
 		queue:              make(chan trace.SpanSnapshot, 5000),

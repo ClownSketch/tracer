@@ -21,7 +21,7 @@ func TestInitTracer_EnablesDefaultFallbackDir(t *testing.T) {
 		_ = os.Chdir(oldWD)
 	}()
 
-	provider := InitTracer(TracerConfig{
+	provider, err := InitTracer(TracerConfig{
 		ServiceName:    "test-service",
 		SampleRate:     1.0,
 		ExporterType:   ExporterTypeFile,
@@ -30,6 +30,9 @@ func TestInitTracer_EnablesDefaultFallbackDir(t *testing.T) {
 		BatchInterval:  10 * time.Millisecond,
 		FileMaxBackups: 1,
 	})
+	if err != nil {
+		t.Fatalf("初始化 Tracer 失败: %v", err)
+	}
 	defer provider.Shutdown(context.Background())
 
 	fallbackDir := filepath.Join(tempDir, "storage", "fallback")
@@ -42,14 +45,14 @@ func TestInitTracer_EnablesDefaultFallbackDir(t *testing.T) {
 	}
 }
 
-func TestInitTracerE_ReturnsFallbackInitializationError(t *testing.T) {
+func TestInitTracerReturnsFallbackInitializationError(t *testing.T) {
 	tempDir := t.TempDir()
 	blockingFile := filepath.Join(tempDir, "not-a-directory")
 	if err := os.WriteFile(blockingFile, []byte("block"), 0o600); err != nil {
 		t.Fatalf("创建阻断文件失败: %v", err)
 	}
 
-	provider, err := InitTracerE(TracerConfig{
+	provider, err := InitTracer(TracerConfig{
 		ServiceName:    "fallback-init-error",
 		SampleRate:     1.0,
 		ExporterType:   ExporterTypeFile,

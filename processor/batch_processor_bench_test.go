@@ -98,7 +98,7 @@ func (m *mockExporter) getStats() (callCount, spanCount, avgTime, minTime, maxTi
 // BenchmarkBatchProcessor_OnEnd 基准测试：OnEnd 方法性能
 func BenchmarkBatchProcessor_OnEnd(b *testing.B) {
 	exporter := newMockExporter()
-	processor := NewBatchSpanProcessor(exporter,
+	processor := mustNewBatchSpanProcessor(b, exporter,
 		WithBatchSize(100),
 		WithWorkers(5),
 		WithFlushInterval(2*time.Second),
@@ -122,7 +122,7 @@ var spanIDCounter int64
 // BenchmarkBatchProcessor_OnEnd_HighConcurrency 基准测试：高并发场景下的 OnEnd 性能
 func BenchmarkBatchProcessor_OnEnd_HighConcurrency(b *testing.B) {
 	exporter := newMockExporter()
-	processor := NewBatchSpanProcessor(exporter,
+	processor := mustNewBatchSpanProcessor(b, exporter,
 		WithBatchSize(500),
 		WithWorkers(10),
 		WithFlushInterval(1*time.Second),
@@ -148,7 +148,7 @@ func BenchmarkBatchProcessor_OnEnd_DifferentBatchSizes(b *testing.B) {
 	for _, batchSize := range batchSizes {
 		b.Run(fmt.Sprintf("BatchSize_%d", batchSize), func(b *testing.B) {
 			exporter := newMockExporter()
-			processor := NewBatchSpanProcessor(exporter,
+			processor := mustNewBatchSpanProcessor(b, exporter,
 				WithBatchSize(batchSize),
 				WithWorkers(5),
 				WithFlushInterval(2*time.Second),
@@ -176,7 +176,7 @@ func BenchmarkBatchProcessor_OnEnd_DifferentWorkers(b *testing.B) {
 	for _, worker := range workers {
 		b.Run(fmt.Sprintf("Workers_%d", worker), func(b *testing.B) {
 			exporter := newMockExporter()
-			processor := NewBatchSpanProcessor(exporter,
+			processor := mustNewBatchSpanProcessor(b, exporter,
 				WithBatchSize(100),
 				WithWorkers(worker),
 				WithFlushInterval(2*time.Second),
@@ -204,7 +204,7 @@ func BenchmarkBatchProcessor_OnEnd_DifferentQueueSizes(b *testing.B) {
 	for _, queueSize := range queueSizes {
 		b.Run(fmt.Sprintf("QueueSize_%d", queueSize), func(b *testing.B) {
 			exporter := newMockExporter()
-			processor := NewBatchSpanProcessor(exporter,
+			processor := mustNewBatchSpanProcessor(b, exporter,
 				WithBatchSize(100),
 				WithWorkers(5),
 				WithFlushInterval(2*time.Second),
@@ -228,7 +228,7 @@ func BenchmarkBatchProcessor_OnEnd_DifferentQueueSizes(b *testing.B) {
 // BenchmarkBatchProcessor_OnEnd_StressTest 压力测试：持续高并发写入
 func BenchmarkBatchProcessor_OnEnd_StressTest(b *testing.B) {
 	exporter := newMockExporter()
-	processor := NewBatchSpanProcessor(exporter,
+	processor := mustNewBatchSpanProcessor(b, exporter,
 		WithBatchSize(500),
 		WithWorkers(10),
 		WithFlushInterval(500*time.Millisecond),
@@ -300,13 +300,13 @@ func TestBatchProcessor_PerformanceMetrics(t *testing.T) {
 	for _, cfg := range configs {
 		t.Run(cfg.name, func(t *testing.T) {
 			exporter := newMockExporter()
-			batchProcessor := NewBatchSpanProcessor(exporter,
+			batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 				WithBatchSize(cfg.batchSize),
 				WithWorkers(cfg.workers),
 				WithFlushInterval(cfg.flushInterval),
 				WithQueueSize(cfg.queueSize),
 				WithQueueHighWaterMark(int(float64(cfg.queueSize)*0.8)),
-			).(*BatchSpanProcessor)
+			)
 			defer batchProcessor.Shutdown(context.Background())
 
 			// 记录开始时间和内存
@@ -473,12 +473,12 @@ func TestBatchProcessor_ConcurrentStress(t *testing.T) {
 	}
 
 	exporter := newMockExporter()
-	batchProcessor := NewBatchSpanProcessor(exporter,
+	batchProcessor := mustNewBatchSpanProcessor(t, exporter,
 		WithBatchSize(1000),
 		WithWorkers(20),
 		WithFlushInterval(500*time.Millisecond),
 		WithQueueHighWaterMark(8000),
-	).(*BatchSpanProcessor)
+	)
 	defer batchProcessor.Shutdown(context.Background())
 
 	concurrency := 5000

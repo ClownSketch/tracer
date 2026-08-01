@@ -114,7 +114,7 @@ func BenchmarkMongoRouting_RequestLifecycle_Parallel(b *testing.B) {
 		collections := benchMongoCollectionNames(count)
 		b.Run(fmt.Sprintf("collections=%d", count), func(b *testing.B) {
 			mockExp := newRoutingAwareMockExporter()
-			batchProcessor := processor.NewBatchSpanProcessor(mockExp,
+			batchProcessor := mustNewBatchSpanProcessor(b, mockExp,
 				processor.WithBatchSize(100),
 				processor.WithWorkers(8),
 				processor.WithFlushInterval(500*time.Millisecond),
@@ -171,7 +171,7 @@ func BenchmarkMongoRouting_SnapshotExport_Parallel(b *testing.B) {
 				_ = routingExp.Shutdown(ctx)
 			}()
 
-			batchProcessor := processor.NewBatchSpanProcessor(routingExp,
+			batchProcessor := mustNewBatchSpanProcessor(b, routingExp,
 				processor.WithBatchSize(100),
 				processor.WithWorkers(8),
 				processor.WithFlushInterval(500*time.Millisecond),
@@ -246,12 +246,12 @@ func TestMongoRouting_RequestLifecycle_ConcurrentMetrics(t *testing.T) {
 		t.Run(sc.name, func(t *testing.T) {
 			collections := benchMongoCollectionNames(sc.collectionCount)
 			mockExp := newRoutingAwareMockExporter()
-			batchProcessor := processor.NewBatchSpanProcessor(mockExp,
+			batchProcessor := mustNewBatchSpanProcessor(t, mockExp,
 				processor.WithBatchSize(100),
 				processor.WithWorkers(8),
 				processor.WithFlushInterval(300*time.Millisecond),
 				processor.WithQueueSize(100000),
-			).(*processor.BatchSpanProcessor)
+			)
 
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer shutdownCancel()

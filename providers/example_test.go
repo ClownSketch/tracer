@@ -48,7 +48,10 @@ func ExampleExporterConfig() {
 		PrettyPrint: true,
 		UseJSON:     true,
 	}
-	exporterConfig := NewExporterConfig(config)
+	exporterConfig, err := NewExporterConfig(config)
+	if err != nil {
+		panic(err)
+	}
 
 	// 使用 ExporterConfig 创建导出器
 	exporter, err := CreateExporter(exporterConfig)

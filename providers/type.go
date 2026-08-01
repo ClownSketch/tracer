@@ -42,16 +42,17 @@ const (
 
 // TracerConfig 定义追踪器配置
 type TracerConfig struct {
-	ServiceName        string        // 服务名称
-	SampleRate         float64       // 采样率
-	IsDebug            bool          // 是否调试
-	BatchSize          int           // 批量大小
-	BatchInterval      time.Duration // 批量间隔
-	Workers            int           // 工作协程数（批处理器）
-	QueueSize          int           // BatchProcessor 队列大小（启动时静态配置，非运行时动态调整）
-	ExporterType       ExporterType  // 导出器类型
-	ExporterEndpoint   string        // Jaeger 或 Zipkin Collector 地址
-	ExporterTimeout    time.Duration // HTTP 导出器请求超时
+	ServiceName        string         // 服务名称
+	SampleRate         float64        // 采样率
+	IsDebug            bool           // 是否调试
+	BatchSize          int            // 批量大小
+	BatchInterval      time.Duration  // 批量间隔
+	Workers            int            // 工作协程数（批处理器）
+	QueueSize          int            // BatchProcessor 队列大小（启动时静态配置，非运行时动态调整）
+	ExporterType       ExporterType   // 导出器类型
+	ExporterOption     ExporterOption // 导出器配置；设置后通过注册表创建导出器
+	ExporterEndpoint   string         // Jaeger 或 Zipkin Collector 地址
+	ExporterTimeout    time.Duration  // HTTP 导出器请求超时
 	ExporterHeaders    map[string]string
 	LogFile            string        // 日志文件
 	FallbackDir        string        // 回退目录
@@ -99,12 +100,16 @@ type ExporterConfig[T ExporterOption] struct {
 	Options T            // 导出器选项（类型安全）
 }
 
-// NewExporterConfig 创建导出器配置
-func NewExporterConfig[T ExporterOption](options T) ExporterConfig[T] {
+// NewExporterConfig 创建并校验导出器配置。
+func NewExporterConfig[T ExporterOption](options T) (ExporterConfig[T], error) {
+	if err := validateExporterOption(options); err != nil {
+		return ExporterConfig[T]{}, err
+	}
+
 	return ExporterConfig[T]{
 		Type:    options.ExporterType(),
 		Options: options,
-	}
+	}, nil
 }
 
 // 兼容旧的 ExporterConfig（非泛型版本，用于向后兼容）

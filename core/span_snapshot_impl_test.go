@@ -1,10 +1,12 @@
 package core
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/ClownSketch/tracer/attribute"
+	"github.com/ClownSketch/tracer/sampler"
 	"github.com/ClownSketch/tracer/types"
 )
 
@@ -41,11 +43,13 @@ func TestCreateSnapshotInfoDeepCopiesMutableState(t *testing.T) {
 		"lang": "zh",
 	}
 	state.eventMu.Lock()
-	state.events = append(state.events, types.SpanEvent{
-		Name:      "event-1",
-		Timestamp: now.Format(time.RFC3339Nano),
-		Attributes: map[string]any{
-			"payload": eventPayload,
+	state.events = append(state.events, spanEvent{
+		event: types.SpanEvent{
+			Name:      "event-1",
+			Timestamp: now.Format(time.RFC3339Nano),
+			Attributes: map[string]any{
+				"payload": eventPayload,
+			},
 		},
 	})
 	state.eventMu.Unlock()
@@ -186,5 +190,77 @@ func TestCreateSnapshotInfoDeepCopiesMutableState(t *testing.T) {
 	}
 	if got := snapUsage.CPUUsage; got != 1.25 {
 		t.Fatalf("expected resource usage to stay 1.25, got %v", got)
+	}
+}
+
+func TestTypedEventSnapshotTransfersWrapperAndClonesPayload(t *testing.T) {
+	tracer := NewTracerImpl("test", nil, nil, sampler.NewAlwaysSampleSampler())
+	_, span := tracer.Start(context.Background(), "typed-event")
+
+	firstPayload := map[string]any{"status": "accepted"}
+	secondPayload := map[string]any{"status": "completed"}
+	span.AddEvent("upstream.request", "upstream", func() map[string]any {
+		return firstPayload
+	})
+	span.AddEvent("upstream.request", "upstream", func() map[string]any {
+		return secondPayload
+	})
+	span.End()
+
+	snapshot := span.GetSnapshot()
+	if snapshot == nil {
+		t.Fatal("事件 Span 结束后应生成快照")
+	}
+	defer snapshot.Release()
+
+	firstPayload["status"] = "changed"
+	secondPayload["status"] = "changed"
+
+	events := snapshot.GetEvents()
+	if len(events) != 1 {
+		t.Fatalf("事件数量=%d，期望=1", len(events))
+	}
+	items, ok := events[0].Attributes["upstream"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("分组事件载荷=%#v，期望包含2条记录", events[0].Attributes["upstream"])
+	}
+	firstSnapshotPayload, ok := items[0].(map[string]any)
+	if !ok || firstSnapshotPayload["status"] != "accepted" {
+		t.Fatalf("第一条事件快照=%#v，期望保留accepted", items[0])
+	}
+	secondSnapshotPayload, ok := items[1].(map[string]any)
+	if !ok || secondSnapshotPayload["status"] != "completed" {
+		t.Fatalf("第二条事件快照=%#v，期望保留completed", items[1])
+	}
+}
+
+func TestSpanAttributeManagerInitializesLazily(t *testing.T) {
+	span := createSpan()
+	state := span.loadState()
+	if state == nil {
+		t.Fatal("expected span state")
+	}
+	defer releaseSpanState(state)
+
+	if state.attributeManager != nil {
+		t.Fatal("没有传播属性时不应初始化 AttributeManager")
+	}
+	if attributes := span.GetGlobalAttributes(); attributes != nil {
+		t.Fatalf("未设置全局属性时应返回 nil，实际=%#v", attributes)
+	}
+	if state.attributeManager != nil {
+		t.Fatal("读取空属性不应触发 AttributeManager 初始化")
+	}
+
+	span.SetGlobalAttribute("region", attribute.StringValue("IN"))
+	span.SetInheritedAttribute("request_id", attribute.StringValue("req-1"))
+	if state.attributeManager == nil {
+		t.Fatal("设置传播属性后应初始化 AttributeManager")
+	}
+	if value := span.GetGlobalAttributes()["region"].Value.String(); value != "IN" {
+		t.Fatalf("全局属性=%q，期望=IN", value)
+	}
+	if value := span.GetInheritedAttributes()["request_id"].Value.String(); value != "req-1" {
+		t.Fatalf("继承属性=%q，期望=req-1", value)
 	}
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	provider, err := providers.InitTracerE(providers.TracerConfig{
+	provider, err := providers.InitTracer(providers.TracerConfig{
 		ServiceName:   "tracer-basic-example",
 		ExporterType:  providers.ExporterTypeFile,
 		LogFile:       "./storage/example/basic/traces.log",
