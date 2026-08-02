@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-02
+
 ### Added
 
 - 增加 MongoDB Driver v2 显式导出接口，并保留 Driver v1 接入能力。
@@ -28,7 +30,3 @@
 - 修复单条非法 Span 导致整批数据被丢弃的问题。
 - 修复 fallback 写入与恢复大小限制不一致的问题。
 - 修复非 `map[string]any` 类型日志字段在 fallback/WAL 恢复时丢失的问题。
-
-## [1.0.0-rc.1] - 待发布
-
-- 首个候选发布版本；发布内容以 `Unreleased` 为准。

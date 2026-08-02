@@ -1,5 +1,9 @@
 # Tracer
 
+[![CI](https://github.com/ClownSketch/tracer/actions/workflows/ci.yml/badge.svg)](https://github.com/ClownSketch/tracer/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ClownSketch/tracer.svg)](https://pkg.go.dev/github.com/ClownSketch/tracer)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 `Tracer` 是面向 Go 服务的分布式链路追踪库。它负责创建和传播 Trace、记录 Span、批量导出数据，并在远端暂时不可用时提供本地补偿能力。
 
 ## 设计目标
@@ -168,3 +172,7 @@ go vet ./...
 ```
 
 需要 MongoDB 的集成测试与高并发验证命令见 [发布检查](./docs/release-checklist.md)。
+
+## License
+
+本项目基于 [MIT License](./LICENSE) 开源。
