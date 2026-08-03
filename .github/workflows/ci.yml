@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -83,3 +84,19 @@ jobs:
           go test ./integration
           -run 'TestMongoDBExporter_(FullFlowE2E|WALFullFlowE2E|EventAttributesSchemaE2E)|TestMongoDBV2Exporter_EventAttributesSchemaE2E'
           -count=1 -v
+
+  vulnerability:
+    name: 依赖漏洞检查
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .go-version
+          cache: true
+
+      - name: 运行 govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
