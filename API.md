@@ -80,7 +80,7 @@ defer span.End()
 
 ### `WithForceRecord`
 
-无论采样器如何决策都记录当前 Span。适合支付命令、人工操作和异常处理等关键链路。
+无论采样器如何决策都记录当前 Span。适合管理命令、人工操作和异常处理等关键链路。
 
 ### `WithRecordOnError`
 
@@ -102,8 +102,8 @@ defer span.End()
 
 ```go
 span.SetAttributes(
-	attribute.String("order.no", orderNo),
-	attribute.Int64("amount", amount),
+	attribute.String("request.id", requestID),
+	attribute.Int64("item.count", itemCount),
 	attribute.Bool("retry", false),
 )
 ```
@@ -114,7 +114,7 @@ span.SetAttributes(
 
 ```go
 span.SetGlobalAttributes(attribute.String("environment", "production"))
-span.SetInheritedAttributes(attribute.String("merchant.no", "ME000001"))
+span.SetInheritedAttributes(attribute.String("tenant.id", "TENANT001"))
 ```
 
 ### 事件
@@ -122,10 +122,10 @@ span.SetInheritedAttributes(attribute.String("merchant.no", "ME000001"))
 事件用于记录一个操作内部的阶段信息。
 
 ```go
-span.AddEvent("channel.request", "http", func() map[string]any {
+span.AddEvent("upstream.request", "http", func() map[string]any {
 	return map[string]any{
-		"channel_code": "UPI_001",
-		"attempt":      1,
+		"service": "profile-api",
+		"attempt": 1,
 	}
 })
 ```
@@ -136,9 +136,9 @@ span.AddEvent("channel.request", "http", func() map[string]any {
 span.AddLog(tracer.SpanLog{
 	Timestamp: time.Now().Format(time.RFC3339Nano),
 	Severity:  tracer.SpanLogSeverityInfo,
-	Message:   "通道请求已受理",
+	Message:   "上游请求已受理",
 	Fields: map[string]any{
-		"channel_code": "UPI_001",
+		"service": "profile-api",
 	},
 })
 ```
@@ -149,7 +149,7 @@ Tracer 只负责记录调用方传入的数据，不负责业务脱敏。宿主�
 
 ```go
 if err != nil {
-	span.WithError(err, "创建代收订单失败")
+	span.WithError(err, "创建资源失败")
 	span.SetStatus(tracer.SpanStatus{
 		Code:    tracer.StatusCodeError,
 		Message: err.Error(),

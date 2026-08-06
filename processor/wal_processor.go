@@ -35,15 +35,17 @@ const (
 	walRecordMaxPayloadBytes = 16 * 1024 * 1024
 )
 
+// walCheckpoint 记录下一次读取的 WAL 分段和字节偏移。
 type walCheckpoint struct {
-	SegmentID int64 `json:"segment_id"`
-	Offset    int64 `json:"offset"`
+	SegmentID int64 `json:"segment_id"` // 分段编号
+	Offset    int64 `json:"offset"`     // 分段内字节偏移
 }
 
+// walSegmentFile 描述磁盘上的一个 WAL 分段文件。
 type walSegmentFile struct {
-	ID   int64
-	Path string
-	Size int64
+	ID   int64  // 分段编号
+	Path string // 文件路径
+	Size int64  // 文件大小
 }
 
 // WALSpanProcessor 将 span 先写入本地 WAL，再由后台协程同步投递到远端 exporter。
@@ -193,6 +195,8 @@ func NewWALSpanProcessor(exporter trace.SyncSpanExporter, opts ...WALSpanProcess
 	return processor, nil
 }
 
+// init 创建 WAL 目录、恢复 checkpoint 并打开新的写入分段。
+// @return err error 初始化错误
 func (p *WALSpanProcessor) init() error {
 	if p.exporter == nil {
 		return errors.New("wal processor requires a sync span exporter")
@@ -319,6 +323,9 @@ func (p *WALSpanProcessor) finishShutdown() {
 	}
 }
 
+// appendPayload 把序列化记录追加到当前 WAL 分段。
+// @param payload []byte 序列化 Span
+// @return err error 写入或刷盘错误
 func (p *WALSpanProcessor) appendPayload(payload []byte) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
@@ -350,6 +357,8 @@ func (p *WALSpanProcessor) appendPayload(payload []byte) error {
 	return nil
 }
 
+// closeWriter 刷新并关闭当前 WAL 写入器。
+// @return err error 刷盘或关闭错误
 func (p *WALSpanProcessor) closeWriter() error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
@@ -378,6 +387,9 @@ func (p *WALSpanProcessor) closeWriter() error {
 	return nil
 }
 
+// openSegmentLocked 切换到指定 WAL 分段；调用方必须持有 writeMu。
+// @param segmentID int64 新分段编号
+// @return err error 文件打开错误
 func (p *WALSpanProcessor) openSegmentLocked(segmentID int64) error {
 	if p.currentFile != nil {
 		if err := p.flushWriterLocked(true); err != nil {
@@ -413,6 +425,7 @@ func (p *WALSpanProcessor) openSegmentLocked(segmentID int64) error {
 	return nil
 }
 
+// flushLoop 周期刷新缓冲写入器，并唤醒后台投递协程。
 func (p *WALSpanProcessor) flushLoop() {
 	defer p.flushWg.Done()
 
@@ -436,12 +449,18 @@ func (p *WALSpanProcessor) flushLoop() {
 	}
 }
 
+// flushWriter 在加锁后刷新 WAL 写入缓冲区。
+// @param sync bool 是否同步到磁盘
+// @return err error 刷盘错误
 func (p *WALSpanProcessor) flushWriter(sync bool) error {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	return p.flushWriterLocked(sync)
 }
 
+// flushWriterLocked 刷新 WAL 写入缓冲区；调用方必须持有 writeMu。
+// @param sync bool 是否同步到磁盘
+// @return err error 刷盘错误
 func (p *WALSpanProcessor) flushWriterLocked(sync bool) error {
 	if p.currentFile == nil || p.bufferedWriter == nil || !p.writeDirty {
 		if sync && p.currentFile != nil {
@@ -460,6 +479,7 @@ func (p *WALSpanProcessor) flushWriterLocked(sync bool) error {
 	return nil
 }
 
+// dispatchLoop 按通知或轮询周期读取 WAL 并投递远端。
 func (p *WALSpanProcessor) dispatchLoop() {
 	defer p.dispatchWg.Done()
 
@@ -519,6 +539,9 @@ func (p *WALSpanProcessor) GetLastError() error {
 	return p.lastError
 }
 
+// dispatchOnce 投递一个 WAL 批次并推进 checkpoint。
+// @return progressed bool 本轮是否推进了 WAL
+// @return err error 读取、导出或 checkpoint 错误
 func (p *WALSpanProcessor) dispatchOnce() (bool, error) {
 	if advanced, err := p.advanceCheckpointIfSegmentConsumed(); err != nil || advanced {
 		return advanced, err
@@ -554,6 +577,9 @@ func (p *WALSpanProcessor) dispatchOnce() (bool, error) {
 	return true, nil
 }
 
+// advanceCheckpointIfSegmentConsumed 删除已消费分段并切换到下一分段。
+// @return advanced bool checkpoint 是否发生变化
+// @return err error 文件或 checkpoint 错误
 func (p *WALSpanProcessor) advanceCheckpointIfSegmentConsumed() (bool, error) {
 	checkpoint := p.getCheckpoint()
 	segments, err := p.listSegments()
@@ -588,6 +614,12 @@ func (p *WALSpanProcessor) advanceCheckpointIfSegmentConsumed() (bool, error) {
 	return false, nil
 }
 
+// readBatch 从指定分段和偏移读取一个完整记录批次。
+// @param segmentID int64 分段编号
+// @param offset int64 起始字节偏移
+// @return payloads [][]byte 读取到的序列化记录
+// @return nextOffset int64 下一次读取偏移
+// @return err error 文件或校验错误
 func (p *WALSpanProcessor) readBatch(segmentID, offset int64) ([][]byte, int64, error) {
 	segmentPath := p.segmentPath(segmentID)
 	file, err := os.Open(segmentPath)
@@ -657,6 +689,8 @@ func (p *WALSpanProcessor) readBatch(segmentID, offset int64) ([][]byte, int64, 
 	return payloads, nextOffset, nil
 }
 
+// isFullyDrained 判断全部 WAL 分段是否已经消费完成。
+// @return result bool 是否消费完成
 func (p *WALSpanProcessor) isFullyDrained() bool {
 	checkpoint := p.getCheckpoint()
 	segments, err := p.listSegments()
@@ -671,6 +705,7 @@ func (p *WALSpanProcessor) isFullyDrained() bool {
 	return checkpoint.SegmentID == last.ID && checkpoint.Offset >= last.Size
 }
 
+// notifyDispatcher 非阻塞唤醒后台投递协程。
 func (p *WALSpanProcessor) notifyDispatcher() {
 	select {
 	case p.notifyCh <- struct{}{}:
@@ -678,12 +713,17 @@ func (p *WALSpanProcessor) notifyDispatcher() {
 	}
 }
 
+// getCheckpoint 返回当前 checkpoint 快照。
+// @return result walCheckpoint 当前 checkpoint
 func (p *WALSpanProcessor) getCheckpoint() walCheckpoint {
 	p.checkpointMu.Lock()
 	defer p.checkpointMu.Unlock()
 	return p.checkpoint
 }
 
+// setCheckpoint 持久化并更新内存中的 checkpoint。
+// @param checkpoint walCheckpoint 新 checkpoint
+// @return err error 持久化错误
 func (p *WALSpanProcessor) setCheckpoint(checkpoint walCheckpoint) error {
 	p.checkpointMu.Lock()
 	defer p.checkpointMu.Unlock()
@@ -694,6 +734,10 @@ func (p *WALSpanProcessor) setCheckpoint(checkpoint walCheckpoint) error {
 	return nil
 }
 
+// loadCheckpoint 从磁盘恢复 checkpoint，并在缺失时选择首个分段。
+// @param segments []walSegmentFile 已发现的 WAL 分段
+// @return checkpoint walCheckpoint 恢复后的 checkpoint
+// @return err error 读取或解析错误
 func (p *WALSpanProcessor) loadCheckpoint(segments []walSegmentFile) (walCheckpoint, error) {
 	path := filepath.Join(p.dir, walCheckpointFileName)
 	data, err := os.ReadFile(path)
@@ -720,6 +764,9 @@ func (p *WALSpanProcessor) loadCheckpoint(segments []walSegmentFile) (walCheckpo
 	return checkpoint, nil
 }
 
+// persistCheckpoint 通过临时文件原子替换 checkpoint。
+// @param checkpoint walCheckpoint 待保存的 checkpoint
+// @return err error 写入错误
 func (p *WALSpanProcessor) persistCheckpoint(checkpoint walCheckpoint) error {
 	data, err := json.Marshal(checkpoint)
 	if err != nil {
@@ -734,6 +781,9 @@ func (p *WALSpanProcessor) persistCheckpoint(checkpoint walCheckpoint) error {
 	return os.Rename(tmpPath, path)
 }
 
+// listSegments 扫描并按编号排序 WAL 分段。
+// @return segments []walSegmentFile WAL 分段集合
+// @return err error 目录读取错误
 func (p *WALSpanProcessor) listSegments() ([]walSegmentFile, error) {
 	entries, err := os.ReadDir(p.dir)
 	if err != nil {
@@ -766,26 +816,40 @@ func (p *WALSpanProcessor) listSegments() ([]walSegmentFile, error) {
 	return segments, nil
 }
 
+// segmentPath 返回指定 WAL 分段的完整路径。
+// @param segmentID int64 分段编号
+// @return result string 文件路径
 func (p *WALSpanProcessor) segmentPath(segmentID int64) string {
 	return filepath.Join(p.dir, walSegmentFileName(segmentID))
 }
 
+// getActiveSegmentID 返回当前写入分段编号。
+// @return result int64 分段编号
 func (p *WALSpanProcessor) getActiveSegmentID() int64 {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	return p.currentSegmentID
 }
 
+// isWriterClosed 返回 WAL 写入器是否已经关闭。
+// @return result bool 是否关闭
 func (p *WALSpanProcessor) isWriterClosed() bool {
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	return p.writerClosed
 }
 
+// walSegmentFileName 生成 WAL 分段文件名。
+// @param segmentID int64 分段编号
+// @return result string 文件名
 func walSegmentFileName(segmentID int64) string {
 	return walSegmentFilePrefix + strconv.FormatInt(segmentID, 10) + walSegmentFileSuffix
 }
 
+// parseSegmentID 从合法 WAL 文件名解析分段编号。
+// @param name string 文件名
+// @return segmentID int64 分段编号
+// @return ok bool 文件名是否有效
 func parseSegmentID(name string) (int64, bool) {
 	if !strings.HasPrefix(name, walSegmentFilePrefix) || !strings.HasSuffix(name, walSegmentFileSuffix) {
 		return 0, false
@@ -798,6 +862,11 @@ func parseSegmentID(name string) (int64, bool) {
 	return id, true
 }
 
+// findSegmentForID 查找指定编号的 WAL 分段。
+// @param segments []walSegmentFile WAL 分段集合
+// @param segmentID int64 目标编号
+// @return segment *walSegmentFile 匹配分段
+// @return index int 分段下标；未找到时为 -1
 func findSegmentForID(segments []walSegmentFile, segmentID int64) (*walSegmentFile, int) {
 	for i := range segments {
 		if segments[i].ID == segmentID {
@@ -807,6 +876,11 @@ func findSegmentForID(segments []walSegmentFile, segmentID int64) (*walSegmentFi
 	return nil, -1
 }
 
+// writeRecordToWriter 写入长度、校验码和记录载荷。
+// @param writer io.Writer 目标写入器
+// @param payload []byte 序列化 Span
+// @return written int 写入字节数
+// @return err error 写入错误
 func writeRecordToWriter(writer io.Writer, payload []byte) (int, error) {
 	if len(payload) == 0 {
 		return 0, errors.New("empty wal payload")
@@ -830,10 +904,16 @@ func writeRecordToWriter(writer io.Writer, payload []byte) (int, error) {
 	return headerWritten + payloadWritten, nil
 }
 
+// truncateFile 截断不完整 WAL 尾部。
+// @param path string 文件路径
+// @param size int64 保留长度
+// @return err error 截断错误
 func truncateFile(path string, size int64) error {
 	return os.Truncate(path, size)
 }
 
+// releaseWALSpanSnapshots 释放 WAL 投递阶段已经消费的快照。
+// @param spans []trace.SpanSnapshot Span 快照集合
 func releaseWALSpanSnapshots(spans []trace.SpanSnapshot) {
 	for _, span := range spans {
 		if span != nil {

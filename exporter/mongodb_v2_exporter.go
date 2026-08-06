@@ -16,10 +16,12 @@ import (
 	"github.com/ClownSketch/tracer/trace"
 )
 
+// mongoV2QueueItem 保存一次待写入的 MongoDB Driver v2 文档。
 type mongoV2QueueItem struct {
-	doc any
+	doc any // 已完成 BSON 结构转换的文档
 }
 
+// mongoV2SpanDocument 定义 Span 在 MongoDB Driver v2 中的存储结构。
 type mongoV2SpanDocument struct {
 	Name          string                        `bson:"name"`
 	TraceID       string                        `bson:"trace_id"`
@@ -41,11 +43,13 @@ type mongoV2SpanDocument struct {
 	LinkedSpans   []mongoV2LinkedSpanDocument   `bson:"linked_spans,omitempty"`
 }
 
+// mongoV2StatusDocument 定义 Span 状态的存储结构。
 type mongoV2StatusDocument struct {
 	Code        any    `bson:"code,omitempty"`
 	Description string `bson:"description,omitempty"`
 }
 
+// mongoV2LogDocument 定义 Span 日志的存储结构。
 type mongoV2LogDocument struct {
 	Timestamp  string         `bson:"timestamp"`
 	Message    string         `bson:"message"`
@@ -55,6 +59,7 @@ type mongoV2LogDocument struct {
 	EventType  string         `bson:"eventType,omitempty"`
 }
 
+// mongoV2ErrorDocument 定义错误详情的存储结构。
 type mongoV2ErrorDocument struct {
 	Code            string                      `bson:"code,omitempty"`
 	Message         string                      `bson:"message"`
@@ -66,6 +71,7 @@ type mongoV2ErrorDocument struct {
 	StackTrace      []mongoV2StackFrameDocument `bson:"stack_trace,omitempty"`
 }
 
+// mongoV2StackFrameDocument 定义单个错误堆栈帧的存储结构。
 type mongoV2StackFrameDocument struct {
 	File         string `bson:"file,omitempty"`
 	FileName     string `bson:"file_name,omitempty"`
@@ -73,12 +79,14 @@ type mongoV2StackFrameDocument struct {
 	LineNumber   int    `bson:"line_number,omitempty"`
 }
 
+// mongoV2ResourceDocument 定义服务资源信息的存储结构。
 type mongoV2ResourceDocument struct {
 	ServiceName string         `bson:"service_name,omitempty"`
 	Host        string         `bson:"host,omitempty"`
 	Attributes  map[string]any `bson:"attributes,omitempty"`
 }
 
+// mongoV2ResourceUsageDocument 定义资源使用指标的存储结构。
 type mongoV2ResourceUsageDocument struct {
 	CPUUsage    float64 `bson:"cpu_usage,omitempty"`
 	MemoryUsage float64 `bson:"memory_usage,omitempty"`
@@ -86,6 +94,7 @@ type mongoV2ResourceUsageDocument struct {
 	NetworkIO   float64 `bson:"network_io,omitempty"`
 }
 
+// mongoV2LinkedSpanDocument 定义关联 Span 的存储结构。
 type mongoV2LinkedSpanDocument struct {
 	TraceID string `bson:"trace_id"`
 	SpanID  string `bson:"span_id"`
@@ -235,6 +244,7 @@ func NewMongoDBV2Exporter(uri, database, collection string, opts ...MongoDBV2Exp
 	return e.initWithURI(uri, database, collection)
 }
 
+// normalizeRuntimeConfig 修正运行期配置的无效边界值。
 func (e *MongoDBV2Exporter) normalizeRuntimeConfig() {
 	if e.maxConcurrentWrites <= 0 {
 		e.maxConcurrentWrites = 1
@@ -452,6 +462,8 @@ func (e *MongoDBV2Exporter) ExportSpansSync(ctx context.Context, spans []trace.S
 	return nil
 }
 
+// releaseSpanSnapshotsV2 释放 Driver v2 导出器已经消费的快照资源。
+// @param spans []trace.SpanSnapshot 已处理的快照集合
 func releaseSpanSnapshotsV2(spans []trace.SpanSnapshot) {
 	for _, span := range spans {
 		if span != nil {
@@ -460,6 +472,10 @@ func releaseSpanSnapshotsV2(spans []trace.SpanSnapshot) {
 	}
 }
 
+// buildQueueItem 把 Span 快照转换为待写入队列项。
+// @param span trace.SpanSnapshot Span 快照
+// @param includeRecordID bool 是否生成幂等记录标识
+// @return result mongoV2QueueItem 待写入队列项
 func (e *MongoDBV2Exporter) buildQueueItem(span trace.SpanSnapshot, includeRecordID bool) mongoV2QueueItem {
 	return mongoV2QueueItem{
 		doc: e.buildDocument(span, includeRecordID),
@@ -486,6 +502,12 @@ func (e *MongoDBV2Exporter) writeBatchWithRetry(ctx context.Context, items []mon
 	return err
 }
 
+// writeItemsWithRetry 分块写入文档，并为每个分块执行失败重试。
+// @param ctx context.Context 上下文
+// @param collection *mongo.Collection 目标集合
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoV2QueueItem 待写入队列项
+// @return err error 写入错误
 func (e *MongoDBV2Exporter) writeItemsWithRetry(ctx context.Context, collection *mongo.Collection, timeout time.Duration, items []mongoV2QueueItem) error {
 	if len(items) == 0 {
 		return nil
@@ -504,6 +526,12 @@ func (e *MongoDBV2Exporter) writeItemsWithRetry(ctx context.Context, collection 
 	return nil
 }
 
+// insertItemsChunkWithRetry 写入一个分块，并在允许次数内重试临时错误。
+// @param ctx context.Context 上下文
+// @param collection *mongo.Collection 目标集合
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoV2QueueItem 当前分块
+// @return err error 写入错误
 func (e *MongoDBV2Exporter) insertItemsChunkWithRetry(ctx context.Context, collection *mongo.Collection, timeout time.Duration, items []mongoV2QueueItem) error {
 	docs := e.borrowDocsBuffer(len(items))
 	defer e.releaseDocsBuffer(docs)
@@ -537,6 +565,9 @@ func (e *MongoDBV2Exporter) insertItemsChunkWithRetry(ctx context.Context, colle
 	return lastErr
 }
 
+// borrowDocsBuffer 从对象池获取指定长度的文档缓冲区。
+// @param size int 所需长度
+// @return result []any 文档缓冲区
 func (e *MongoDBV2Exporter) borrowDocsBuffer(size int) []any {
 	bufPtr := e.docsPool.Get().(*[]any)
 	buf := *bufPtr
@@ -548,6 +579,8 @@ func (e *MongoDBV2Exporter) borrowDocsBuffer(size int) []any {
 	return buf
 }
 
+// releaseDocsBuffer 清空文档引用并归还对象池。
+// @param buf []any 已使用的文档缓冲区
 func (e *MongoDBV2Exporter) releaseDocsBuffer(buf []any) {
 	if cap(buf) == 0 {
 		return
@@ -559,6 +592,9 @@ func (e *MongoDBV2Exporter) releaseDocsBuffer(buf []any) {
 	e.docsPool.Put(&buf)
 }
 
+// ctxOrBackgroundV2 为 nil 上下文提供可用的后台上下文。
+// @param ctx context.Context 原始上下文
+// @return result context.Context 可用上下文
 func ctxOrBackgroundV2(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -566,6 +602,10 @@ func ctxOrBackgroundV2(ctx context.Context) context.Context {
 	return ctx
 }
 
+// sleepWithContextV2 等待重试间隔，并响应上下文取消。
+// @param ctx context.Context 上下文
+// @param delay time.Duration 等待时长
+// @return err error 上下文取消错误
 func sleepWithContextV2(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
@@ -584,6 +624,9 @@ func sleepWithContextV2(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// isMongoV2DuplicateOnlyInsertError 判断批量写入是否仅包含重复键错误。
+// @param err error MongoDB 写入错误
+// @return result bool 是否可以按幂等成功处理
 func isMongoV2DuplicateOnlyInsertError(err error) bool {
 	if err == nil {
 		return false
@@ -618,6 +661,9 @@ func isMongoV2DuplicateOnlyInsertError(err error) bool {
 	return mongo.IsDuplicateKeyError(err)
 }
 
+// isMongoV2DuplicateKeyCode 判断错误码是否表示重复键。
+// @param code int MongoDB 错误码
+// @return result bool 是否为重复键错误码
 func isMongoV2DuplicateKeyCode(code int) bool {
 	switch code {
 	case 11000, 11001, 12582, 16460:
@@ -749,6 +795,9 @@ func (e *MongoDBV2Exporter) buildDocument(span trace.SpanSnapshot, includeRecord
 	return doc
 }
 
+// buildMongoV2RecordID 根据 Span 身份和结束时间生成幂等记录标识。
+// @param span trace.SpanSnapshot Span 快照
+// @return result string 记录标识
 func buildMongoV2RecordID(span trace.SpanSnapshot) string {
 	return fmt.Sprintf("%s:%s:%d", span.GetSpanTraceID(), span.GetSpanID(), span.GetEndTime().UnixNano())
 }

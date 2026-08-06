@@ -48,7 +48,7 @@ func main() {
 	)
 	span.SetAttributes(
 		attribute.String("adjust_no", "MA202607310001"),
-		attribute.String("subject_type", "merchant"),
+		attribute.String("subject_type", "tenant"),
 	)
 	span.End()
 

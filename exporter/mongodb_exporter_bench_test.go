@@ -22,7 +22,7 @@ func BenchmarkMongoDBExporter_BuildDocument(b *testing.B) {
 	span.Attributes = map[string]any{
 		"service": "gateway",
 		"method":  "POST",
-		"path":    "/payments",
+		"path":    "/resources",
 		"retry":   false,
 		"amount":  128.5,
 	}
@@ -39,7 +39,7 @@ func BenchmarkMongoDBExporter_BuildDocument(b *testing.B) {
 	span.Logs = []types.SpanLog{
 		{
 			Timestamp: now.Format(time.RFC3339Nano),
-			Message:   "payment accepted",
+			Message:   "request accepted",
 			Severity:  types.SpanLogSeverityInfo,
 			Attributes: map[string]any{
 				"channel": "api",
@@ -65,7 +65,7 @@ func BenchmarkMongoDBExporter_BuildDocument(b *testing.B) {
 	span.ErrorDetail = &types.ErrorDetail{
 		Code:         "E_BENCH",
 		Message:      "bench error",
-		BusinessCode: "PAYMENT_BENCH",
+		BusinessCode: "REQUEST_BENCH",
 		MetaData: map[string]any{
 			"retryable": false,
 		},

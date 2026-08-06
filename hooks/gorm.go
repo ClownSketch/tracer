@@ -19,6 +19,8 @@ import (
 type GormHookPlugin struct {
 }
 
+// Name 返回 GORM 插件注册名称。
+// @return result string 插件名称
 func (h *GormHookPlugin) Name() string {
 	return "tracePlugin"
 }

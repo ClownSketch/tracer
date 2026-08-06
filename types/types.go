@@ -32,6 +32,8 @@ const (
 	SpanKindAsync    SpanKind = "async"    // 异步Span
 )
 
+// String 返回 Span 类型的字符串值。
+// @return result string Span 类型
 func (s SpanKind) String() string {
 	return string(s)
 }
@@ -51,6 +53,8 @@ const (
 	StatusCodeUnknown StatusCode = "50006" // 未知
 )
 
+// String 返回状态码的字符串值。
+// @return result string 状态码
 func (s StatusCode) String() string {
 	return string(s)
 }

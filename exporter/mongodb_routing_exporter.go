@@ -28,9 +28,10 @@ type MongoDBRoutingExporter struct {
 	indexMu            sync.Mutex
 }
 
+// mongodbRoutingExporterBuilder 汇总路由导出器的构造参数。
 type mongodbRoutingExporterBuilder struct {
-	mongoOpts []MongoDBExporterOption
-	allowed   map[string]struct{}
+	mongoOpts []MongoDBExporterOption // 基础 MongoDB 导出器选项
+	allowed   map[string]struct{}     // 允许写入的集合白名单
 }
 
 // MongoDBRoutingExporterOption MongoDB 路由导出器选项。
@@ -169,11 +170,16 @@ func (e *MongoDBRoutingExporter) ExportSpansSync(ctx context.Context, spans []tr
 	return nil
 }
 
+// mongoRoutingQueueItem 绑定待写入文档与目标集合。
 type mongoRoutingQueueItem struct {
-	doc        any
-	collection *mongo.Collection
+	doc        any               // 已完成 BSON 结构转换的文档
+	collection *mongo.Collection // 当前文档的目标集合
 }
 
+// resolveCollection 根据 Span 路由信息解析目标集合。
+// @param span trace.SpanSnapshot Span 快照
+// @return collection *mongo.Collection 目标集合
+// @return err error 集合解析错误
 func (e *MongoDBRoutingExporter) resolveCollection(span trace.SpanSnapshot) (*mongo.Collection, error) {
 	name := span.GetMongoCollection()
 	if name == "" {
@@ -185,6 +191,9 @@ func (e *MongoDBRoutingExporter) resolveCollection(span trace.SpanSnapshot) (*mo
 	return e.getOrCreateCollection(name)
 }
 
+// defaultCollection 返回初始化时配置的默认集合。
+// @return collection *mongo.Collection 默认集合
+// @return err error 集合不可用错误
 func (e *MongoDBRoutingExporter) defaultCollection() (*mongo.Collection, error) {
 	e.base.mu.RLock()
 	collection := e.base.collection
@@ -195,6 +204,9 @@ func (e *MongoDBRoutingExporter) defaultCollection() (*mongo.Collection, error) 
 	return collection, nil
 }
 
+// isCollectionAllowed 判断集合名是否满足白名单约束。
+// @param name string 集合名
+// @return result bool 是否允许写入
 func (e *MongoDBRoutingExporter) isCollectionAllowed(name string) bool {
 	if len(e.allowedCollections) == 0 {
 		return true
@@ -203,6 +215,10 @@ func (e *MongoDBRoutingExporter) isCollectionAllowed(name string) bool {
 	return ok
 }
 
+// getOrCreateCollection 获取缓存集合，并确保目标索引已经创建。
+// @param name string 集合名
+// @return collection *mongo.Collection 目标集合
+// @return err error 初始化错误
 func (e *MongoDBRoutingExporter) getOrCreateCollection(name string) (*mongo.Collection, error) {
 	if cached, ok := e.collectionCache.Load(name); ok {
 		collection := cached.(*mongo.Collection)
@@ -228,6 +244,10 @@ func (e *MongoDBRoutingExporter) getOrCreateCollection(name string) (*mongo.Coll
 	return resolved, nil
 }
 
+// writeRoutingBatchWithRetry 写入路由批次；跨集合批次先按集合分组。
+// @param ctx context.Context 上下文
+// @param items []mongoRoutingQueueItem 路由队列项
+// @return err error 写入错误
 func (e *MongoDBRoutingExporter) writeRoutingBatchWithRetry(ctx context.Context, items []mongoRoutingQueueItem) error {
 	if len(items) == 0 {
 		return nil
@@ -251,6 +271,11 @@ func (e *MongoDBRoutingExporter) writeRoutingBatchWithRetry(ctx context.Context,
 	return e.base.writeItemsWithRetry(ctx, first, timeout, queueItems)
 }
 
+// writeRoutingBatchGrouped 按集合分组写入路由队列项。
+// @param ctx context.Context 上下文
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoRoutingQueueItem 路由队列项
+// @return err error 写入错误
 func (e *MongoDBRoutingExporter) writeRoutingBatchGrouped(ctx context.Context, timeout time.Duration, items []mongoRoutingQueueItem) error {
 	groups := make(map[*mongo.Collection][]mongoQueueItem)
 	for _, item := range items {
@@ -265,6 +290,10 @@ func (e *MongoDBRoutingExporter) writeRoutingBatchGrouped(ctx context.Context, t
 	return nil
 }
 
+// ensureRoutingCollectionIndexes 为动态集合补齐标准索引。
+// @param collection *mongo.Collection 目标集合
+// @param name string 集合名
+// @return err error 索引检查或创建错误
 func (e *MongoDBRoutingExporter) ensureRoutingCollectionIndexes(collection *mongo.Collection, name string) error {
 	if _, loaded := e.indexedCollections.Load(name); loaded {
 		return nil
@@ -315,6 +344,8 @@ func (e *MongoDBRoutingExporter) ensureRoutingCollectionIndexes(collection *mong
 	return nil
 }
 
+// routingCollectionIndexModels 返回路由集合使用的标准索引定义。
+// @return result []mongo.IndexModel 索引定义
 func routingCollectionIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{

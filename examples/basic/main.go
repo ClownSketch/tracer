@@ -29,7 +29,7 @@ func main() {
 
 	tracer.SetTracerProvider(provider, "tracer-basic-example")
 	if err := createOrder(context.Background()); err != nil {
-		log.Printf("创建订单失败: %v", err)
+		log.Printf("创建资源失败: %v", err)
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -59,7 +59,7 @@ func createOrder(ctx context.Context) error {
 	span.AddLog(tracer.SpanLog{
 		Timestamp: time.Now().Format(time.RFC3339Nano),
 		Severity:  tracer.SpanLogSeverityInfo,
-		Message:   "订单创建完成",
+		Message:   "资源创建完成",
 	})
 
 	if traceID := tracer.GetTraceID(ctx); traceID == "" {

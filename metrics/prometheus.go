@@ -94,7 +94,7 @@ func NewPrometheusMetrics(opts ...PrometheusMetricsOption) *PrometheusMetrics {
 	return metrics
 }
 
-// NewPrometheusMetricsE 创建指标收集器并同步返回端口监听错误。
+// NewPrometheusMetricsE 创建指标收集器并同步返回端口绑定错误。
 func NewPrometheusMetricsE(opts ...PrometheusMetricsOption) (*PrometheusMetrics, error) {
 	metrics := newPrometheusMetrics(opts...)
 	listener, err := net.Listen("tcp", metrics.serverAddr)
@@ -111,7 +111,7 @@ func NewPrometheusMetricsE(opts ...PrometheusMetricsOption) (*PrometheusMetrics,
 	return metrics, nil
 }
 
-// newPrometheusMetrics 构建尚未启动监听的指标收集器。
+// newPrometheusMetrics 构建尚未启动 HTTP 服务的指标收集器。
 func newPrometheusMetrics(opts ...PrometheusMetricsOption) *PrometheusMetrics {
 	m := &PrometheusMetrics{
 		serverAddr: ":9090",

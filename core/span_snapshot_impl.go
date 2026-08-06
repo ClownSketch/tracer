@@ -195,6 +195,9 @@ func createSnapshotInfo(span *spanImpl, state *spanState) *snapshotImpl {
 	return snap
 }
 
+// cloneSpanEvent 复制事件并隔离其中的可变属性。
+// @param event spanEvent 原始事件
+// @return result types.SpanEvent 可安全导出的事件副本
 func cloneSpanEvent(event spanEvent) types.SpanEvent {
 	if event.ownsAttributes {
 		return types.SpanEvent{
@@ -226,6 +229,9 @@ func cloneOwnedEventAttributes(attributes map[string]any) map[string]any {
 	return attributes
 }
 
+// cloneSpanLog 复制日志及其可变字段。
+// @param log types.SpanLog 原始日志
+// @return result types.SpanLog 日志副本
 func cloneSpanLog(log types.SpanLog) types.SpanLog {
 	return types.SpanLog{
 		Timestamp:  log.Timestamp,
@@ -237,6 +243,9 @@ func cloneSpanLog(log types.SpanLog) types.SpanLog {
 	}
 }
 
+// cloneErrorDetail 复制错误详情，避免导出期间被调用方修改。
+// @param detail *types.ErrorDetail 原始错误详情
+// @return result *types.ErrorDetail 错误详情副本
 func cloneErrorDetail(detail *types.ErrorDetail) *types.ErrorDetail {
 	if detail == nil {
 		return nil
@@ -254,6 +263,9 @@ func cloneErrorDetail(detail *types.ErrorDetail) *types.ErrorDetail {
 	}
 }
 
+// cloneResourceInfo 复制资源信息及其属性。
+// @param resource *types.ResourceInfo 原始资源信息
+// @return result *types.ResourceInfo 资源信息副本
 func cloneResourceInfo(resource *types.ResourceInfo) *types.ResourceInfo {
 	if resource == nil {
 		return nil
@@ -266,6 +278,9 @@ func cloneResourceInfo(resource *types.ResourceInfo) *types.ResourceInfo {
 	}
 }
 
+// cloneResourceMetrics 复制资源指标。
+// @param metrics *types.ResourceMetrics 原始资源指标
+// @return result *types.ResourceMetrics 资源指标副本
 func cloneResourceMetrics(metrics *types.ResourceMetrics) *types.ResourceMetrics {
 	if metrics == nil {
 		return nil
@@ -275,6 +290,9 @@ func cloneResourceMetrics(metrics *types.ResourceMetrics) *types.ResourceMetrics
 	return &cloned
 }
 
+// cloneMapStringAny 深拷贝字符串键属性集合。
+// @param src map[string]any 原始属性集合
+// @return result map[string]any 属性副本
 func cloneMapStringAny(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
@@ -287,7 +305,9 @@ func cloneMapStringAny(src map[string]any) map[string]any {
 	return dst
 }
 
-// 复制快照值
+// cloneSnapshotValue 复制快照支持的标量、集合和结构化值。
+// @param value any 原始值
+// @return result any 可安全导出的值副本
 func cloneSnapshotValue(value any) any {
 	switch v := value.(type) {
 	case nil,
@@ -380,6 +400,9 @@ func cloneSnapshotValue(value any) any {
 	}
 }
 
+// cloneCollectionValue 通过反射复制未显式覆盖的 Map、Slice 和数组。
+// @param value any 原始集合
+// @return result any 集合副本；非集合值保持原值
 func cloneCollectionValue(value any) any {
 	rv := reflect.ValueOf(value)
 	if !rv.IsValid() {
@@ -420,6 +443,11 @@ func cloneCollectionValue(value any) any {
 	}
 }
 
+// adaptClonedValue 将复制结果转换为目标集合元素类型。
+// @param value any 复制后的值
+// @param targetType reflect.Type 目标元素类型
+// @param fallback reflect.Value 无法转换时使用的原值
+// @return result reflect.Value 可写入目标集合的值
 func adaptClonedValue(value any, targetType reflect.Type, fallback reflect.Value) reflect.Value {
 	if value == nil {
 		return reflect.Zero(targetType)

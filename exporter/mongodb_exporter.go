@@ -15,10 +15,12 @@ import (
 	"github.com/ClownSketch/tracer/trace"
 )
 
+// mongoQueueItem 保存一次待写入的 MongoDB 文档。
 type mongoQueueItem struct {
-	doc any
+	doc any // 已完成 BSON 结构转换的文档
 }
 
+// mongoSpanDocument 定义 Span 在 MongoDB 中的存储结构。
 type mongoSpanDocument struct {
 	Name          string                      `bson:"name"`
 	TraceID       string                      `bson:"trace_id"`
@@ -40,11 +42,13 @@ type mongoSpanDocument struct {
 	LinkedSpans   []mongoLinkedSpanDocument   `bson:"linked_spans,omitempty"`
 }
 
+// mongoStatusDocument 定义 Span 状态的存储结构。
 type mongoStatusDocument struct {
 	Code        any    `bson:"code,omitempty"`
 	Description string `bson:"description,omitempty"`
 }
 
+// mongoLogDocument 定义 Span 日志的存储结构。
 type mongoLogDocument struct {
 	Timestamp  string         `bson:"timestamp"`
 	Message    string         `bson:"message"`
@@ -54,6 +58,7 @@ type mongoLogDocument struct {
 	EventType  string         `bson:"eventType,omitempty"`
 }
 
+// mongoErrorDocument 定义错误详情的存储结构。
 type mongoErrorDocument struct {
 	Code            string                    `bson:"code,omitempty"`
 	Message         string                    `bson:"message"`
@@ -65,6 +70,7 @@ type mongoErrorDocument struct {
 	StackTrace      []mongoStackFrameDocument `bson:"stack_trace,omitempty"`
 }
 
+// mongoStackFrameDocument 定义单个错误堆栈帧的存储结构。
 type mongoStackFrameDocument struct {
 	File         string `bson:"file,omitempty"`
 	FileName     string `bson:"file_name,omitempty"`
@@ -72,12 +78,14 @@ type mongoStackFrameDocument struct {
 	LineNumber   int    `bson:"line_number,omitempty"`
 }
 
+// mongoResourceDocument 定义服务资源信息的存储结构。
 type mongoResourceDocument struct {
 	ServiceName string         `bson:"service_name,omitempty"`
 	Host        string         `bson:"host,omitempty"`
 	Attributes  map[string]any `bson:"attributes,omitempty"`
 }
 
+// mongoResourceUsageDocument 定义资源使用指标的存储结构。
 type mongoResourceUsageDocument struct {
 	CPUUsage    float64 `bson:"cpu_usage,omitempty"`
 	MemoryUsage float64 `bson:"memory_usage,omitempty"`
@@ -85,6 +93,7 @@ type mongoResourceUsageDocument struct {
 	NetworkIO   float64 `bson:"network_io,omitempty"`
 }
 
+// mongoLinkedSpanDocument 定义关联 Span 的存储结构。
 type mongoLinkedSpanDocument struct {
 	TraceID string `bson:"trace_id"`
 	SpanID  string `bson:"span_id"`
@@ -234,6 +243,7 @@ func NewMongoDBExporter(uri, database, collection string, opts ...MongoDBExporte
 	return e.initWithURI(uri, database, collection)
 }
 
+// normalizeRuntimeConfig 修正运行期配置的无效边界值。
 func (e *MongoDBExporter) normalizeRuntimeConfig() {
 	if e.maxConcurrentWrites <= 0 {
 		e.maxConcurrentWrites = 1
@@ -451,6 +461,8 @@ func (e *MongoDBExporter) ExportSpansSync(ctx context.Context, spans []trace.Spa
 	return nil
 }
 
+// releaseSpanSnapshots 释放导出器已经消费的快照资源。
+// @param spans []trace.SpanSnapshot 已处理的快照集合
 func releaseSpanSnapshots(spans []trace.SpanSnapshot) {
 	for _, span := range spans {
 		if span != nil {
@@ -459,6 +471,10 @@ func releaseSpanSnapshots(spans []trace.SpanSnapshot) {
 	}
 }
 
+// buildQueueItem 把 Span 快照转换为待写入队列项。
+// @param span trace.SpanSnapshot Span 快照
+// @param includeRecordID bool 是否生成幂等记录标识
+// @return result mongoQueueItem 待写入队列项
 func (e *MongoDBExporter) buildQueueItem(span trace.SpanSnapshot, includeRecordID bool) mongoQueueItem {
 	return mongoQueueItem{
 		doc: e.buildDocument(span, includeRecordID),
@@ -485,6 +501,12 @@ func (e *MongoDBExporter) writeBatchWithRetry(ctx context.Context, items []mongo
 	return err
 }
 
+// writeItemsWithRetry 分块写入文档，并为每个分块执行失败重试。
+// @param ctx context.Context 上下文
+// @param collection *mongo.Collection 目标集合
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoQueueItem 待写入队列项
+// @return err error 写入错误
 func (e *MongoDBExporter) writeItemsWithRetry(ctx context.Context, collection *mongo.Collection, timeout time.Duration, items []mongoQueueItem) error {
 	if len(items) == 0 {
 		return nil
@@ -503,6 +525,12 @@ func (e *MongoDBExporter) writeItemsWithRetry(ctx context.Context, collection *m
 	return nil
 }
 
+// insertItemsChunkWithRetry 写入一个分块，并在允许次数内重试临时错误。
+// @param ctx context.Context 上下文
+// @param collection *mongo.Collection 目标集合
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoQueueItem 当前分块
+// @return err error 写入错误
 func (e *MongoDBExporter) insertItemsChunkWithRetry(ctx context.Context, collection *mongo.Collection, timeout time.Duration, items []mongoQueueItem) error {
 	docs := e.borrowDocsBuffer(len(items))
 	defer e.releaseDocsBuffer(docs)
@@ -536,6 +564,9 @@ func (e *MongoDBExporter) insertItemsChunkWithRetry(ctx context.Context, collect
 	return lastErr
 }
 
+// borrowDocsBuffer 从对象池获取指定长度的文档缓冲区。
+// @param size int 所需长度
+// @return result []any 文档缓冲区
 func (e *MongoDBExporter) borrowDocsBuffer(size int) []any {
 	bufPtr := e.docsPool.Get().(*[]any)
 	buf := *bufPtr
@@ -547,6 +578,8 @@ func (e *MongoDBExporter) borrowDocsBuffer(size int) []any {
 	return buf
 }
 
+// releaseDocsBuffer 清空文档引用并归还对象池。
+// @param buf []any 已使用的文档缓冲区
 func (e *MongoDBExporter) releaseDocsBuffer(buf []any) {
 	if cap(buf) == 0 {
 		return
@@ -558,6 +591,9 @@ func (e *MongoDBExporter) releaseDocsBuffer(buf []any) {
 	e.docsPool.Put(&buf)
 }
 
+// ctxOrBackground 为 nil 上下文提供可用的后台上下文。
+// @param ctx context.Context 原始上下文
+// @return result context.Context 可用上下文
 func ctxOrBackground(ctx context.Context) context.Context {
 	if ctx == nil {
 		return context.Background()
@@ -565,6 +601,10 @@ func ctxOrBackground(ctx context.Context) context.Context {
 	return ctx
 }
 
+// sleepWithContext 等待重试间隔，并响应上下文取消。
+// @param ctx context.Context 上下文
+// @param delay time.Duration 等待时长
+// @return err error 上下文取消错误
 func sleepWithContext(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
@@ -583,6 +623,9 @@ func sleepWithContext(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// isDuplicateOnlyInsertError 判断批量写入是否仅包含重复键错误。
+// @param err error MongoDB 写入错误
+// @return result bool 是否可以按幂等成功处理
 func isDuplicateOnlyInsertError(err error) bool {
 	if err == nil {
 		return false
@@ -617,6 +660,9 @@ func isDuplicateOnlyInsertError(err error) bool {
 	return mongo.IsDuplicateKeyError(err)
 }
 
+// isDuplicateKeyCode 判断错误码是否表示重复键。
+// @param code int MongoDB 错误码
+// @return result bool 是否为重复键错误码
 func isDuplicateKeyCode(code int) bool {
 	switch code {
 	case 11000, 11001, 12582, 16460:
@@ -748,6 +794,9 @@ func (e *MongoDBExporter) buildDocument(span trace.SpanSnapshot, includeRecordID
 	return doc
 }
 
+// buildMongoRecordID 根据 Span 身份和结束时间生成幂等记录标识。
+// @param span trace.SpanSnapshot Span 快照
+// @return result string 记录标识
 func buildMongoRecordID(span trace.SpanSnapshot) string {
 	return fmt.Sprintf("%s:%s:%d", span.GetSpanTraceID(), span.GetSpanID(), span.GetEndTime().UnixNano())
 }

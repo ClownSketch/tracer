@@ -277,9 +277,10 @@ func extractResponseInfo(resp interface{}, req *http.Request, duration time.Dura
 	}
 }
 
+// requestBodyReadCloser 组合重放读取器与原始请求体关闭器。
 type requestBodyReadCloser struct {
-	io.Reader
-	io.Closer
+	io.Reader // 重放已经读取的字节，并继续读取原始请求体
+	io.Closer // 关闭原始请求体
 }
 
 // readRequestBodyWithoutConsuming 读取有限的追踪副本，并保持业务请求体完整。

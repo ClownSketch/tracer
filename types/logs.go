@@ -14,6 +14,8 @@ const (
 	SpanLogSeverityMetric SpanLogSeverity = "metric" // 指标
 )
 
+// String 返回日志级别的字符串值。
+// @return result string 日志级别
 func (s SpanLogSeverity) String() string {
 	return string(s)
 }

@@ -257,6 +257,9 @@ func ConvertSpanSnapshotToWALJSON(span trace.SpanSnapshot) ([]byte, error) {
 	return json.Marshal(data)
 }
 
+// spanDataFromSnapshotNoClone 构建 WAL 数据，并复用已经冻结的快照字段。
+// @param span trace.SpanSnapshot Span 快照
+// @return result *SpanData WAL 序列化数据
 func spanDataFromSnapshotNoClone(span trace.SpanSnapshot) *SpanData {
 	data := &SpanData{
 		MongoCollection: span.GetMongoCollection(),

@@ -412,6 +412,10 @@ func InitTracer(config TracerConfig) (trace.TracerProvider, error) {
 	return NewTracerProvider(opts...), nil
 }
 
+// createConfiguredExporter 根据统一配置创建导出器。
+// @param config TracerConfig Tracer 配置
+// @return result trace.SpanExporter 导出器
+// @return err error 配置或构造错误
 func createConfiguredExporter(config TracerConfig) (trace.SpanExporter, error) {
 	if config.ExporterOption != nil {
 		if err := validateExporterOption(config.ExporterOption); err != nil {
@@ -430,9 +434,9 @@ func createConfiguredExporter(config TracerConfig) (trace.SpanExporter, error) {
 	case ExporterTypeConsole:
 		return CreateExporterFromOption(ConsoleExporterConfig{UseJSON: true})
 	case ExporterTypeJaeger:
-		return nil, errors.New("jaeger 导出器尚未通过官方 Collector 协议验证，不能用于生产初始化")
+		return nil, errors.New("jaeger 导出器未接入 InitTracer，请使用显式构造器")
 	case ExporterTypeZipkin:
-		return nil, errors.New("zipkin 导出器尚未通过官方 Collector 集成验证，不能用于生产初始化")
+		return nil, errors.New("zipkin 导出器未接入 InitTracer，请使用显式构造器")
 	case ExporterTypeMongoDB:
 		return CreateExporterFromOption(newMongoExporterConfig(config))
 	case ExporterTypeMongoDBRouting:
@@ -470,6 +474,11 @@ func createConfiguredSampler(sampleRate float64) (trace.SpanSampler, error) {
 	return sampler.NewDistributedSampler(sampleRate), nil
 }
 
+// createPrimaryProcessor 根据可靠性模式创建主 Span 处理器。
+// @param spanExporter trace.SpanExporter 导出器
+// @param config TracerConfig Tracer 配置
+// @return result trace.SpanProcessor Span 处理器
+// @return err error 配置或构造错误
 func createPrimaryProcessor(spanExporter trace.SpanExporter, config TracerConfig) (trace.SpanProcessor, error) {
 	if config.UseWAL {
 		syncExporter, ok := spanExporter.(trace.SyncSpanExporter)
@@ -521,6 +530,9 @@ func createPrimaryProcessor(spanExporter trace.SpanExporter, config TracerConfig
 	return batchProcessor, nil
 }
 
+// newFileExporterConfig 从统一配置构建文件导出器配置。
+// @param config TracerConfig Tracer 配置
+// @return result FileExporterConfig 文件导出器配置
 func newFileExporterConfig(config TracerConfig) FileExporterConfig {
 	result := FileExporterConfig{
 		FilePath:        config.LogFile,
@@ -541,6 +553,9 @@ func newFileExporterConfig(config TracerConfig) FileExporterConfig {
 	return result
 }
 
+// newMongoExporterConfig 从统一配置构建固定集合 MongoDB 配置。
+// @param config TracerConfig Tracer 配置
+// @return result MongoDBExporterConfig MongoDB 导出器配置
 func newMongoExporterConfig(config TracerConfig) MongoDBExporterConfig {
 	result := MongoDBExporterConfig{
 		CollectionObj:       config.MongoDBCollectionObj,
@@ -580,6 +595,9 @@ func newMongoExporterConfig(config TracerConfig) MongoDBExporterConfig {
 	return result
 }
 
+// newMongoRoutingExporterConfig 从统一配置构建路由 MongoDB 配置。
+// @param config TracerConfig Tracer 配置
+// @return result MongoDBRoutingExporterConfig 路由导出器配置
 func newMongoRoutingExporterConfig(config TracerConfig) MongoDBRoutingExporterConfig {
 	result := MongoDBRoutingExporterConfig{
 		CollectionObj:       config.MongoDBCollectionObj,
@@ -620,6 +638,9 @@ func newMongoRoutingExporterConfig(config TracerConfig) MongoDBRoutingExporterCo
 	return result
 }
 
+// newWALProcessorOptions 从统一配置构建 WAL 处理器选项。
+// @param config TracerConfig Tracer 配置
+// @return result []processor.WALSpanProcessorOption WAL 选项
 func newWALProcessorOptions(config TracerConfig) []processor.WALSpanProcessorOption {
 	opts := make([]processor.WALSpanProcessorOption, 0, 7)
 	if config.WALDir != "" {

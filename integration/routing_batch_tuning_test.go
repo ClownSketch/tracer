@@ -28,7 +28,7 @@ type batchProcessorProfile struct {
 	expectDrop         bool // 基线对照组，队列不足时仅告警不 fail
 }
 
-func setupPaymentRouteTracerWithProfile(t *testing.T, cfg paymentRoutePerfConfig, p batchProcessorProfile) (trace.Tracer, *processor.BatchSpanProcessor, *exporter.MongoDBRoutingExporter, func()) {
+func setupResourceRouteTracerWithProfile(t *testing.T, cfg resourceRoutePerfConfig, p batchProcessorProfile) (trace.Tracer, *processor.BatchSpanProcessor, *exporter.MongoDBRoutingExporter, func()) {
 	t.Helper()
 
 	mongoOpts := []exporter.MongoDBRoutingExporterOption{
@@ -46,7 +46,7 @@ func setupPaymentRouteTracerWithProfile(t *testing.T, cfg paymentRoutePerfConfig
 		cfg.URI,
 		cfg.Database,
 		cfg.DefaultCollection,
-		append(mongoOpts, exporter.WithMongoDBRoutingAllowedCollections(cfg.DefaultCollection, paymentRouteCollection))...,
+		append(mongoOpts, exporter.WithMongoDBRoutingAllowedCollections(cfg.DefaultCollection, resourceRouteCollection))...,
 	)
 	if err != nil {
 		t.Fatalf("创建路由导出器失败: %v", err)
@@ -80,7 +80,7 @@ type batchTuneResult struct {
 	expectedSpans    int64
 	exportedSpans    int64
 	exportErrors     int64
-	paymentDocs      int64
+	resourceDocs     int64
 	genElapsed       time.Duration
 	e2eElapsed       time.Duration
 	maxQueueLen      int64
@@ -92,16 +92,16 @@ type batchTuneResult struct {
 
 func runBatchTuneScenario(
 	t *testing.T,
-	cfg paymentRoutePerfConfig,
+	cfg resourceRoutePerfConfig,
 	p batchProcessorProfile,
 	requestsTotal int,
 	concurrency int,
 ) batchTuneResult {
 	t.Helper()
 
-	cleanupPaymentRouteCollections(t, mustConnectMongo(t, cfg.URI), cfg)
+	cleanupResourceRouteCollections(t, mustConnectMongo(t, cfg.URI), cfg)
 
-	tr, batchProcessor, routingExp, cleanup := setupPaymentRouteTracerWithProfile(t, cfg, p)
+	tr, batchProcessor, routingExp, cleanup := setupResourceRouteTracerWithProfile(t, cfg, p)
 	defer cleanup()
 
 	expectedSpans := int64(requestsTotal * 3)
@@ -151,7 +151,7 @@ func runBatchTuneScenario(
 			defer wg.Done()
 			for i := 0; i < count; i++ {
 				sem <- struct{}{}
-				elapsed := simulatePaymentRouteRequest(tr, workerID*100000+i, cfg.RunID)
+				elapsed := simulateResourceRouteRequest(tr, workerID*100000+i, cfg.RunID)
 				atomic.AddInt64(&totalHandleNs, elapsed.Nanoseconds())
 				<-sem
 			}
@@ -183,7 +183,7 @@ func runBatchTuneScenario(
 
 	client := mustConnectMongo(t, cfg.URI)
 	defer disconnectMongo(t, client)
-	paymentDocs, _ := countCollectionDocs(client.Database(cfg.Database).Collection(paymentRouteCollection))
+	resourceDocs, _ := countCollectionDocs(client.Database(cfg.Database).Collection(resourceRouteCollection))
 
 	dropped := expectedSpans - exported
 	if dropped < 0 {
@@ -196,7 +196,7 @@ func runBatchTuneScenario(
 		expectedSpans:    expectedSpans,
 		exportedSpans:    exported,
 		exportErrors:     errors,
-		paymentDocs:      paymentDocs,
+		resourceDocs:     resourceDocs,
 		genElapsed:       genElapsed,
 		e2eElapsed:       e2eElapsed,
 		maxQueueLen:      maxQueueLen,
@@ -255,14 +255,14 @@ func batchTuneProfiles() []batchProcessorProfile {
 	}
 }
 
-// TestPaymentRoute_BatchProcessorTuning_20k40kQPS 对比不同 BatchProcessor 参数在 2万/4万 请求突发下的表现。
+// TestResourceRoute_BatchProcessorTuning_20k40kQPS 对比不同 BatchProcessor 参数在 2万/4万 请求突发下的表现。
 //
 // 运行:
 //
 //	MONGO_URI='mongodb://<username>:<password>@127.0.0.1:27017/?authSource=admin' \
-//	go test ./integration -run TestPaymentRoute_BatchProcessorTuning_20k40kQPS -v -count=1 -timeout=30m
-func TestPaymentRoute_BatchProcessorTuning_20k40kQPS(t *testing.T) {
-	cfg := loadPaymentRoutePerfConfig(t)
+//	go test ./integration -run TestResourceRoute_BatchProcessorTuning_20k40kQPS -v -count=1 -timeout=30m
+func TestResourceRoute_BatchProcessorTuning_20k40kQPS(t *testing.T) {
+	cfg := loadResourceRoutePerfConfig(t)
 	client := mustConnectMongo(t, cfg.URI)
 	defer disconnectMongo(t, client)
 
@@ -287,7 +287,7 @@ func TestPaymentRoute_BatchProcessorTuning_20k40kQPS(t *testing.T) {
 					t.Logf("--- 参数: batchSize=%d workers=%d queueSize=%d flush=%v mongoConcurrent=%d ---",
 						profile.batchSize, profile.workers, profile.queueSize, profile.flushInterval, profile.mongoMaxConcurrent)
 					t.Logf("请求数=%d 期望spans=%d 导出spans=%d 落库=%d 丢弃=%d 导出错误=%d",
-						res.requests, res.expectedSpans, res.exportedSpans, res.paymentDocs, res.droppedSpans, res.exportErrors)
+						res.requests, res.expectedSpans, res.exportedSpans, res.resourceDocs, res.droppedSpans, res.exportErrors)
 					t.Logf("生成阶段: %v, 请求QPS=%.0f, avgHandle=%.1fµs, 峰值队列=%d",
 						res.genElapsed, res.sustainedReqQPS, res.avgHandleUs, res.maxQueueLen)
 					t.Logf("端到端(含落库): %v, spanQPS=%.0f", res.e2eElapsed, res.sustainedSpanQPS)
@@ -303,8 +303,8 @@ func TestPaymentRoute_BatchProcessorTuning_20k40kQPS(t *testing.T) {
 							t.Error(msg)
 						}
 					}
-					if res.paymentDocs != res.expectedSpans {
-						msg := fmt.Sprintf("落库不完整: 期望 %d, 实际 %d", res.expectedSpans, res.paymentDocs)
+					if res.resourceDocs != res.expectedSpans {
+						msg := fmt.Sprintf("落库不完整: 期望 %d, 实际 %d", res.expectedSpans, res.resourceDocs)
 						if profile.expectDrop {
 							t.Log("⚠️ [基线预期] " + msg)
 						} else {
@@ -332,8 +332,8 @@ func TestPaymentRoute_BatchProcessorTuning_20k40kQPS(t *testing.T) {
 	}
 }
 
-// TestPaymentRoute_InitTracerConfigExample 演示主项目 InitTracer 静态配置写法（不连 Mongo，仅编译校验）。
-func TestPaymentRoute_InitTracerConfigExample(t *testing.T) {
+// TestResourceRoute_InitTracerConfigExample 演示主项目 InitTracer 静态配置写法（不连 Mongo，仅编译校验）。
+func TestResourceRoute_InitTracerConfigExample(t *testing.T) {
 	cfg := providers.TracerConfig{
 		ServiceName:                "gateway",
 		ExporterType:               providers.ExporterTypeMongoDBRouting,

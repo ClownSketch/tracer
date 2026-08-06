@@ -97,10 +97,10 @@ func TestNewPrometheusMetricsE_ReturnsListenError(t *testing.T) {
 
 	metrics, err := NewPrometheusMetricsE(WithPrometheusAddr(listener.Addr().String()))
 	if err == nil {
-		t.Fatal("端口已占用时应返回监听错误")
+		t.Fatal("端口已占用时应返回绑定错误")
 	}
 	if metrics != nil {
-		t.Fatal("监听失败后不应返回已启动的指标收集器")
+		t.Fatal("启动失败后不应返回已启动的指标收集器")
 	}
 }
 

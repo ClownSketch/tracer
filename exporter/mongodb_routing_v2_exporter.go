@@ -28,9 +28,10 @@ type MongoDBRoutingV2Exporter struct {
 	indexMu            sync.Mutex
 }
 
+// mongodbRoutingV2ExporterBuilder 汇总 Driver v2 路由导出器的构造参数。
 type mongodbRoutingV2ExporterBuilder struct {
-	mongoOpts []MongoDBV2ExporterOption
-	allowed   map[string]struct{}
+	mongoOpts []MongoDBV2ExporterOption // 基础 MongoDB Driver v2 导出器选项
+	allowed   map[string]struct{}       // 允许写入的集合白名单
 }
 
 // MongoDBRoutingV2ExporterOption MongoDB 路由导出器选项。
@@ -169,11 +170,16 @@ func (e *MongoDBRoutingV2Exporter) ExportSpansSync(ctx context.Context, spans []
 	return nil
 }
 
+// mongoRoutingV2QueueItem 绑定待写入文档与 Driver v2 目标集合。
 type mongoRoutingV2QueueItem struct {
-	doc        any
-	collection *mongo.Collection
+	doc        any               // 已完成 BSON 结构转换的文档
+	collection *mongo.Collection // 当前文档的目标集合
 }
 
+// resolveCollection 根据 Span 路由信息解析目标集合。
+// @param span trace.SpanSnapshot Span 快照
+// @return collection *mongo.Collection 目标集合
+// @return err error 集合解析错误
 func (e *MongoDBRoutingV2Exporter) resolveCollection(span trace.SpanSnapshot) (*mongo.Collection, error) {
 	name := span.GetMongoCollection()
 	if name == "" {
@@ -185,6 +191,9 @@ func (e *MongoDBRoutingV2Exporter) resolveCollection(span trace.SpanSnapshot) (*
 	return e.getOrCreateCollection(name)
 }
 
+// defaultCollection 返回初始化时配置的默认集合。
+// @return collection *mongo.Collection 默认集合
+// @return err error 集合不可用错误
 func (e *MongoDBRoutingV2Exporter) defaultCollection() (*mongo.Collection, error) {
 	e.base.mu.RLock()
 	collection := e.base.collection
@@ -195,6 +204,9 @@ func (e *MongoDBRoutingV2Exporter) defaultCollection() (*mongo.Collection, error
 	return collection, nil
 }
 
+// isCollectionAllowed 判断集合名是否满足白名单约束。
+// @param name string 集合名
+// @return result bool 是否允许写入
 func (e *MongoDBRoutingV2Exporter) isCollectionAllowed(name string) bool {
 	if len(e.allowedCollections) == 0 {
 		return true
@@ -203,6 +215,10 @@ func (e *MongoDBRoutingV2Exporter) isCollectionAllowed(name string) bool {
 	return ok
 }
 
+// getOrCreateCollection 获取缓存集合，并确保目标索引已经创建。
+// @param name string 集合名
+// @return collection *mongo.Collection 目标集合
+// @return err error 初始化错误
 func (e *MongoDBRoutingV2Exporter) getOrCreateCollection(name string) (*mongo.Collection, error) {
 	if cached, ok := e.collectionCache.Load(name); ok {
 		collection := cached.(*mongo.Collection)
@@ -228,6 +244,10 @@ func (e *MongoDBRoutingV2Exporter) getOrCreateCollection(name string) (*mongo.Co
 	return resolved, nil
 }
 
+// writeRoutingBatchWithRetry 写入路由批次；跨集合批次先按集合分组。
+// @param ctx context.Context 上下文
+// @param items []mongoRoutingV2QueueItem 路由队列项
+// @return err error 写入错误
 func (e *MongoDBRoutingV2Exporter) writeRoutingBatchWithRetry(ctx context.Context, items []mongoRoutingV2QueueItem) error {
 	if len(items) == 0 {
 		return nil
@@ -251,6 +271,11 @@ func (e *MongoDBRoutingV2Exporter) writeRoutingBatchWithRetry(ctx context.Contex
 	return e.base.writeItemsWithRetry(ctx, first, timeout, queueItems)
 }
 
+// writeRoutingBatchGrouped 按集合分组写入路由队列项。
+// @param ctx context.Context 上下文
+// @param timeout time.Duration 单次写入超时
+// @param items []mongoRoutingV2QueueItem 路由队列项
+// @return err error 写入错误
 func (e *MongoDBRoutingV2Exporter) writeRoutingBatchGrouped(ctx context.Context, timeout time.Duration, items []mongoRoutingV2QueueItem) error {
 	groups := make(map[*mongo.Collection][]mongoV2QueueItem)
 	for _, item := range items {
@@ -265,6 +290,10 @@ func (e *MongoDBRoutingV2Exporter) writeRoutingBatchGrouped(ctx context.Context,
 	return nil
 }
 
+// ensureRoutingCollectionIndexes 为动态集合补齐标准索引。
+// @param collection *mongo.Collection 目标集合
+// @param name string 集合名
+// @return err error 索引检查或创建错误
 func (e *MongoDBRoutingV2Exporter) ensureRoutingCollectionIndexes(collection *mongo.Collection, name string) error {
 	if _, loaded := e.indexedCollections.Load(name); loaded {
 		return nil
@@ -311,6 +340,8 @@ func (e *MongoDBRoutingV2Exporter) ensureRoutingCollectionIndexes(collection *mo
 	return nil
 }
 
+// routingV2CollectionIndexModels 返回 Driver v2 路由集合的标准索引定义。
+// @return result []mongoV2NamedIndex 索引定义
 func routingV2CollectionIndexModels() []mongoV2NamedIndex {
 	return []mongoV2NamedIndex{
 		{

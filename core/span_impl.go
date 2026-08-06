@@ -14,10 +14,12 @@ import (
 )
 
 var (
+	// defaultSuccessStatus 表示未显式设置错误时的默认成功状态。
 	defaultSuccessStatus = &types.SpanStatus{
 		Code:        types.StatusCodeOk,
 		Description: "SuccessFully",
 	}
+	// defaultErrorStatus 表示 Span 未完整结束时的默认错误状态。
 	defaultErrorStatus = &types.SpanStatus{
 		Code:        types.StatusCodeError,
 		Description: "服务发生异常，程序未执行完成",
@@ -127,6 +129,8 @@ func (s *spanState) Reset() {
 	s.mongoMu.Unlock()
 }
 
+// loadState 返回当前 Span 持有的内部状态。
+// @return state *spanState 当前状态；Span 已结束时返回 nil
 func (s *spanImpl) loadState() *spanState {
 	return s.state.Load()
 }
@@ -145,6 +149,7 @@ func (s *spanImpl) lockState() *spanState {
 	return state
 }
 
+// ensureAttributeManager 延迟创建属性管理器。
 func (s *spanState) ensureAttributeManager() {
 	s.onceAttrManager.Do(func() {
 		if s.attributeManager == nil {

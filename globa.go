@@ -13,10 +13,12 @@ import (
 	"github.com/ClownSketch/tracer/trace/noop"
 )
 
+// providerHolder 为 atomic.Value 提供固定的 Provider 存储类型。
 type providerHolder struct {
 	provider trace.TracerProvider
 }
 
+// tracerHolder 为 atomic.Value 提供固定的 Tracer 存储类型。
 type tracerHolder struct {
 	tracer trace.Tracer
 }

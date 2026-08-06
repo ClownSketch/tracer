@@ -249,8 +249,8 @@ func BenchmarkSpan_CoreLifecycle_PrivateAttributes(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, span := tracer.Start(ctx, "benchmark-span")
 		span.SetAttributes(
-			attribute.String("service.name", "payment-gateway"),
-			attribute.Int("merchant.id", 10001),
+			attribute.String("service.name", "edge-gateway"),
+			attribute.Int("tenant.id", 10001),
 			attribute.Bool("request.valid", true),
 		)
 		span.End()
@@ -271,7 +271,7 @@ func BenchmarkSpan_CoreLifecycle_PropagationAttributes(b *testing.B) {
 			attribute.String("region", "ap-south-1"),
 		)
 		span.SetInheritedAttributes(
-			attribute.String("merchant.no", "ME000001"),
+			attribute.String("tenant.no", "TENANT001"),
 			attribute.String("request.no", "REQ000001"),
 		)
 		span.End()

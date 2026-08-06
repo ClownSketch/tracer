@@ -37,6 +37,12 @@ func NewTracerImplWithResource(tracerName string, tracerProvider trace.TracerPro
 	}
 }
 
+// Start 创建 Span，并把新 Span 写入返回的上下文。
+// @param ctx context.Context 父级上下文
+// @param spanName string Span 名称
+// @param options ...types.SpanOptions Span 配置项
+// @return resultCtx context.Context 包含新 Span 的上下文
+// @return resultSpan trace.Span 新建的 Span
 func (t *tracerImpl) Start(ctx context.Context, spanName string, options ...types.SpanOptions) (context.Context, trace.Span) {
 	// 初始化 Span 配置
 	spanConfig := &types.SpanConfig{}

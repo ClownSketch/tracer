@@ -26,6 +26,10 @@ func (sc SpanContext) Validate() bool {
 	return sc.ParentSpanID == "" || isValidHexID(sc.ParentSpanID, 16)
 }
 
+// isValidHexID 校验固定长度、非全零的小写十六进制标识。
+// @param value string 待校验标识
+// @param expectedLength int 期望长度
+// @return result bool 标识是否有效
 func isValidHexID(value string, expectedLength int) bool {
 	if len(value) != expectedLength {
 		return false

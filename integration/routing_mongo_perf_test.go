@@ -23,27 +23,27 @@ import (
 )
 
 const (
-	paymentRouteCollection = "gp_traces_payment"
-	paymentRoutePath       = "/api/v1/payment"
+	resourceRouteCollection = "gp_traces_resource"
+	resourceRoutePath       = "/api/v1/resource"
 )
 
-type paymentRoutePerfConfig struct {
+type resourceRoutePerfConfig struct {
 	URI               string
 	Database          string
 	DefaultCollection string
 	RunID             string
 }
 
-func loadPaymentRoutePerfConfig(t *testing.T) paymentRoutePerfConfig {
+func loadResourceRoutePerfConfig(t *testing.T) resourceRoutePerfConfig {
 	t.Helper()
 
 	uri := firstNonEmpty(os.Getenv("TRACER_BENCH_MONGO_URI"), os.Getenv("MONGO_URI"))
 	if uri == "" {
-		t.Skip("未设置 MONGO_URI，跳过 payment 路由真实性能测试")
+		t.Skip("未设置 MONGO_URI，跳过 resource 路由真实性能测试")
 	}
 
-	runID := fmt.Sprintf("pay-perf-%d", time.Now().UnixNano())
-	return paymentRoutePerfConfig{
+	runID := fmt.Sprintf("route-perf-%d", time.Now().UnixNano())
+	return resourceRoutePerfConfig{
 		URI:               uri,
 		Database:          firstNonEmpty(os.Getenv("TRACER_BENCH_MONGO_DATABASE"), "tracer_routing_bench"),
 		DefaultCollection: firstNonEmpty(os.Getenv("TRACER_BENCH_MONGO_COLLECTION"), "traces_default"),
@@ -51,7 +51,7 @@ func loadPaymentRoutePerfConfig(t *testing.T) paymentRoutePerfConfig {
 	}
 }
 
-func setupPaymentRouteTracer(t *testing.T, cfg paymentRoutePerfConfig) (trace.Tracer, *processor.BatchSpanProcessor, *exporter.MongoDBRoutingExporter, func()) {
+func setupResourceRouteTracer(t *testing.T, cfg resourceRoutePerfConfig) (trace.Tracer, *processor.BatchSpanProcessor, *exporter.MongoDBRoutingExporter, func()) {
 	t.Helper()
 
 	routingExp, err := exporter.NewMongoDBRoutingExporter(
@@ -60,7 +60,7 @@ func setupPaymentRouteTracer(t *testing.T, cfg paymentRoutePerfConfig) (trace.Tr
 		cfg.DefaultCollection,
 		exporter.RoutingWithMongoOption(exporter.WithMongoDBTimeout(15*time.Second)),
 		exporter.RoutingWithMongoOption(exporter.WithMongoDBRetries(3, 150*time.Millisecond)),
-		exporter.WithMongoDBRoutingAllowedCollections(cfg.DefaultCollection, paymentRouteCollection),
+		exporter.WithMongoDBRoutingAllowedCollections(cfg.DefaultCollection, resourceRouteCollection),
 	)
 	if err != nil {
 		t.Fatalf("创建路由导出器失败: %v", err)
@@ -88,31 +88,31 @@ func setupPaymentRouteTracer(t *testing.T, cfg paymentRoutePerfConfig) (trace.Tr
 	return provider.GetTracer("gateway"), batchProcessor, routingExp, cleanup
 }
 
-// simulatePaymentRouteRequest 模拟 /api/v1/payment 中间件 + 业务链路。
-// 中间件在 Start 时设置 WithMongoCollection(paymentRouteCollection)，子 Span 自动继承。
-func simulatePaymentRouteRequest(tr trace.Tracer, requestID int, runID string) time.Duration {
+// simulateResourceRouteRequest 模拟 /api/v1/resource 中间件 + 业务链路。
+// 中间件在 Start 时设置 WithMongoCollection(resourceRouteCollection)，子 Span 自动继承。
+func simulateResourceRouteRequest(tr trace.Tracer, requestID int, runID string) time.Duration {
 	start := time.Now()
 
-	ctx, parent := tr.Start(context.Background(), "POST "+paymentRoutePath,
+	ctx, parent := tr.Start(context.Background(), "POST "+resourceRoutePath,
 		tracerpkg.WithSpanKind(types.SpanKindServer),
 		tracerpkg.WithForceRecord(),
-		tracerpkg.WithMongoCollection(paymentRouteCollection),
+		tracerpkg.WithMongoCollection(resourceRouteCollection),
 	)
 	parent.SetAttributes(
-		attribute.String("http.route", paymentRoutePath),
+		attribute.String("http.route", resourceRoutePath),
 		attribute.String("http.method", "POST"),
 		attribute.String("run_id", runID),
 		attribute.Int("request.seq", requestID),
 	)
 
-	_, dbSpan := tr.Start(ctx, "payment.persist",
+	_, dbSpan := tr.Start(ctx, "resource.persist",
 		tracerpkg.WithSpanKind(types.SpanKindInternal),
 		tracerpkg.WithForceRecord(),
 	)
-	dbSpan.SetAttributes(attribute.String("db.table", "payments"))
+	dbSpan.SetAttributes(attribute.String("db.table", "resources"))
 	dbSpan.End()
 
-	asyncCtx, asyncSpan := baggage.StartAsyncSpan(ctx, tr, "payment.notify",
+	asyncCtx, asyncSpan := baggage.StartAsyncSpan(ctx, tr, "resource.notify",
 		tracerpkg.WithSpanKind(types.SpanKindAsync),
 		tracerpkg.WithForceRecord(),
 	)
@@ -146,47 +146,47 @@ func simulateDefaultRouteRequest(tr trace.Tracer, requestID int, runID string) t
 	return time.Since(start)
 }
 
-type paymentRouteScenario struct {
-	name           string
-	concurrency    int
-	requestsTotal  int
-	paymentPercent int // 0-100
+type resourceRouteScenario struct {
+	name            string
+	concurrency     int
+	requestsTotal   int
+	resourcePercent int // 0-100
 }
 
-// TestPaymentRoute_MongoRealWorldPerformance 真实 Mongo 写入：payment 固定集合场景。
+// TestResourceRoute_MongoRealWorldPerformance 真实 Mongo 写入：resource 固定集合场景。
 //
 // 运行:
 //
 //	MONGO_URI='mongodb://<username>:<password>@127.0.0.1:27017/?authSource=admin' \
-//	go test ./integration -run TestPaymentRoute_MongoRealWorldPerformance -v -count=1 -timeout=15m
-func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
-	cfg := loadPaymentRoutePerfConfig(t)
+//	go test ./integration -run TestResourceRoute_MongoRealWorldPerformance -v -count=1 -timeout=15m
+func TestResourceRoute_MongoRealWorldPerformance(t *testing.T) {
+	cfg := loadResourceRoutePerfConfig(t)
 
 	client := mustConnectMongo(t, cfg.URI)
 	defer disconnectMongo(t, client)
 
-	paymentColl := client.Database(cfg.Database).Collection(paymentRouteCollection)
+	resourceColl := client.Database(cfg.Database).Collection(resourceRouteCollection)
 	defaultColl := client.Database(cfg.Database).Collection(cfg.DefaultCollection)
-	cleanupPaymentRouteCollections(t, client, cfg)
+	cleanupResourceRouteCollections(t, client, cfg)
 
-	scenarios := []paymentRouteScenario{
-		{name: "payment独占-32并发-5000请求", concurrency: 32, requestsTotal: 5000, paymentPercent: 100},
-		{name: "payment独占-64并发-10000请求", concurrency: 64, requestsTotal: 10000, paymentPercent: 100},
-		{name: "payment独占-128并发-10000请求", concurrency: 128, requestsTotal: 10000, paymentPercent: 100},
-		{name: "混合80%payment-64并发-10000请求", concurrency: 64, requestsTotal: 10000, paymentPercent: 80},
-		{name: "混合50%payment-64并发-10000请求", concurrency: 64, requestsTotal: 10000, paymentPercent: 50},
+	scenarios := []resourceRouteScenario{
+		{name: "resource独占-32并发-5000请求", concurrency: 32, requestsTotal: 5000, resourcePercent: 100},
+		{name: "resource独占-64并发-10000请求", concurrency: 64, requestsTotal: 10000, resourcePercent: 100},
+		{name: "resource独占-128并发-10000请求", concurrency: 128, requestsTotal: 10000, resourcePercent: 100},
+		{name: "混合80%resource-64并发-10000请求", concurrency: 64, requestsTotal: 10000, resourcePercent: 80},
+		{name: "混合50%resource-64并发-10000请求", concurrency: 64, requestsTotal: 10000, resourcePercent: 50},
 	}
 
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
-			cleanupPaymentRouteCollections(t, client, cfg)
+			cleanupResourceRouteCollections(t, client, cfg)
 
-			tr, batchProcessor, routingExp, cleanup := setupPaymentRouteTracer(t, cfg)
+			tr, batchProcessor, routingExp, cleanup := setupResourceRouteTracer(t, cfg)
 			defer cleanup()
 
-			paymentRequests := sc.requestsTotal * sc.paymentPercent / 100
-			expectedPaymentSpans := int64(paymentRequests * 3)
-			expectedDefaultSpans := int64((sc.requestsTotal - paymentRequests) * 2)
+			resourceRequests := sc.requestsTotal * sc.resourcePercent / 100
+			expectedResourceSpans := int64(resourceRequests * 3)
+			expectedDefaultSpans := int64((sc.requestsTotal - resourceRequests) * 2)
 
 			var (
 				requestCount  int64
@@ -218,11 +218,11 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 						sem <- struct{}{}
 						reqID := workerID*100000 + i
 						globalSeq := int(atomic.AddInt64(&seq, 1) - 1)
-						isPayment := sc.paymentPercent == 100 || (sc.paymentPercent > 0 && globalSeq%100 < sc.paymentPercent)
+						isResource := sc.resourcePercent == 100 || (sc.resourcePercent > 0 && globalSeq%100 < sc.resourcePercent)
 
 						var elapsed time.Duration
-						if isPayment {
-							elapsed = simulatePaymentRouteRequest(tr, reqID, cfg.RunID)
+						if isResource {
+							elapsed = simulateResourceRouteRequest(tr, reqID, cfg.RunID)
 						} else {
 							elapsed = simulateDefaultRouteRequest(tr, reqID, cfg.RunID)
 						}
@@ -249,7 +249,7 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 			wg.Wait()
 
 			genElapsed := time.Since(benchStart)
-			expectedTotalSpans := expectedPaymentSpans + expectedDefaultSpans
+			expectedTotalSpans := expectedResourceSpans + expectedDefaultSpans
 
 			if err := waitForMongoSpanCount(routingExp, batchProcessor, expectedTotalSpans, 60*time.Second); err != nil {
 				stats := routingExp.GetStats()
@@ -264,9 +264,9 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 			writeElapsed := time.Since(benchStart)
 			runtime.ReadMemStats(&m2)
 
-			paymentDocs, err := countCollectionDocs(paymentColl)
+			resourceDocs, err := countCollectionDocs(resourceColl)
 			if err != nil {
-				t.Fatalf("统计 payment 集合失败: %v", err)
+				t.Fatalf("统计 resource 集合失败: %v", err)
 			}
 			defaultDocs, err := countCollectionDocs(defaultColl)
 			if err != nil {
@@ -279,8 +279,8 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 			avgHandleUs := float64(totalHandleNs) / float64(sc.requestsTotal) / 1000.0
 
 			t.Logf("========== %s ==========", sc.name)
-			t.Logf("场景: payment=%d%%, 并发=%d, 总请求=%d", sc.paymentPercent, sc.concurrency, sc.requestsTotal)
-			t.Logf("Span 结构: payment 请求 3 spans/req, 其他路由 2 spans/req")
+			t.Logf("场景: resource=%d%%, 并发=%d, 总请求=%d", sc.resourcePercent, sc.concurrency, sc.requestsTotal)
+			t.Logf("Span 结构: resource 请求 3 spans/req, 其他路由 2 spans/req")
 			t.Logf("--- 业务侧（Start→End，含 3 span 创建，不含 Mongo 等待）---")
 			t.Logf("请求生成耗时: %v", genElapsed)
 			t.Logf("请求 QPS: %.2f req/s", reqQPS)
@@ -291,15 +291,15 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 			t.Logf("导出 spans: %d, QPS: %.2f spans/s", stats["processed"], spanQPS)
 			t.Logf("导出错误: %d", stats["exportErrors"])
 			t.Logf("--- 落库校验 ---")
-			t.Logf("gp_traces_payment: %d (期望 %d)", paymentDocs, expectedPaymentSpans)
+			t.Logf("gp_traces_resource: %d (期望 %d)", resourceDocs, expectedResourceSpans)
 			t.Logf("%s: %d (期望 %d)", cfg.DefaultCollection, defaultDocs, expectedDefaultSpans)
 			t.Logf("内存增量: %.2f MB", float64(m2.Alloc-m1.Alloc)/1024/1024)
 
 			if stats["exportErrors"] > 0 {
 				t.Fatalf("存在导出错误: %d", stats["exportErrors"])
 			}
-			if paymentDocs != expectedPaymentSpans {
-				t.Fatalf("payment 集合文档数不匹配: 期望 %d, 实际 %d", expectedPaymentSpans, paymentDocs)
+			if resourceDocs != expectedResourceSpans {
+				t.Fatalf("resource 集合文档数不匹配: 期望 %d, 实际 %d", expectedResourceSpans, resourceDocs)
 			}
 			if defaultDocs != expectedDefaultSpans {
 				t.Fatalf("default 集合文档数不匹配: 期望 %d, 实际 %d", expectedDefaultSpans, defaultDocs)
@@ -308,11 +308,11 @@ func TestPaymentRoute_MongoRealWorldPerformance(t *testing.T) {
 	}
 }
 
-func cleanupPaymentRouteCollections(t *testing.T, client *mongo.Client, cfg paymentRoutePerfConfig) {
+func cleanupResourceRouteCollections(t *testing.T, client *mongo.Client, cfg resourceRoutePerfConfig) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	_ = client.Database(cfg.Database).Collection(paymentRouteCollection).Drop(ctx)
+	_ = client.Database(cfg.Database).Collection(resourceRouteCollection).Drop(ctx)
 	_ = client.Database(cfg.Database).Collection(cfg.DefaultCollection).Drop(ctx)
 }
 

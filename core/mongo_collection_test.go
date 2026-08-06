@@ -30,11 +30,11 @@ func TestMongoCollectionInheritance(t *testing.T) {
 
 	_, override := tr.Start(parentCtx, "other.task",
 		func(c *types.SpanConfig) {
-			c.MongoCollection = "gp_traces_payments"
+			c.MongoCollection = "gp_traces_resources"
 		},
 	)
-	if got := override.GetMongoCollection(); got != "gp_traces_payments" {
-		t.Fatalf("expected override collection gp_traces_payments, got %q", got)
+	if got := override.GetMongoCollection(); got != "gp_traces_resources" {
+		t.Fatalf("expected override collection gp_traces_resources, got %q", got)
 	}
 }
 

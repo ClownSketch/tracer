@@ -223,9 +223,10 @@ func ginServerTraceMiddleware(cfg ginServerTraceConfig) gin.HandlerFunc {
 	}
 }
 
+// ginRequestBodyReadCloser 组合重放读取器与原始 Gin 请求体关闭器。
 type ginRequestBodyReadCloser struct {
-	io.Reader
-	io.Closer
+	io.Reader // 重放已经读取的字节，并继续读取原始请求体
+	io.Closer // 关闭原始请求体
 }
 
 // readGinRequestBody 读取有限的追踪副本，并把已读取字节完整放回业务请求。

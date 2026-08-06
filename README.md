@@ -106,9 +106,9 @@ func main() {
 | `mongodb` | 生产可用 | 固定集合存储 |
 | `mongodb_routing` | 生产可用 | 按 Span 路由到受控集合 |
 | `console` | 仅开发 | 终端调试 |
-| `jaeger` | 实验实现 | `InitTracer` 拒绝生产初始化 |
-| `zipkin` | 实验实现 | `InitTracer` 拒绝生产初始化 |
-| `otlp` | 实验实现 | 尚未进入统一生产初始化 |
+| `jaeger` | 实验实现 | 通过显式构造器接入 |
+| `zipkin` | 实验实现 | 通过显式构造器接入 |
+| `otlp` | 实验实现 | 通过显式构造器接入 |
 
 MongoDB 同时保留 Driver v1 和 v2 导出实现。统一 `providers.InitTracer()` 当前使用 Driver v1；Driver v2 由显式构造器接入。
 
@@ -127,7 +127,7 @@ MongoDB 同时保留 Driver v1 和 v2 导出实现。统一 `providers.InitTrace
 
 Span 先写入本地 WAL，再由后台同步投递并推进 checkpoint。适合需要更强本地持久化语义的场景，但会增加磁盘 I/O 和运维成本。
 
-WAL 不是业务事务日志，也不能替代支付系统自己的审计和账务数据。
+WAL 不是业务事务日志，也不能替代宿主系统自己的审计数据。
 
 ## Gin 接入
 

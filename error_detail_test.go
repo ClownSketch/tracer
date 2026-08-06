@@ -14,12 +14,12 @@ func TestCreateErrorDetailWithClownError(t *testing.T) {
 	err := tracer.NewClownError().
 		WithCode("ORDER_NOT_FOUND").
 		WithBusinessCode("PAYIN_ORDER_NOT_FOUND").
-		WithBusinessMessage("代收订单不存在").
+		WithBusinessMessage("目标资源不存在").
 		WithMetadata("out_trade_no", "PI10001").
 		WithHTTPCode(http.StatusBadRequest).
 		WithError(errors.New("order not found"))
 
-	detail := utils.CreateErrorDetail(err, "查询代收订单失败")
+	detail := utils.CreateErrorDetail(err, "查询目标资源失败")
 	if detail == nil {
 		t.Fatal("ClownError 应生成错误详情")
 	}
@@ -29,7 +29,7 @@ func TestCreateErrorDetailWithClownError(t *testing.T) {
 	if detail.HttpCode != http.StatusBadRequest {
 		t.Fatalf("HTTP 状态码记录不正确: %d", detail.HttpCode)
 	}
-	if len(detail.BusinessMessage) != 1 || detail.BusinessMessage[0] != "代收订单不存在" {
+	if len(detail.BusinessMessage) != 1 || detail.BusinessMessage[0] != "目标资源不存在" {
 		t.Fatalf("业务提示记录不正确: %#v", detail.BusinessMessage)
 	}
 	if detail.MetaData["out_trade_no"] != "PI10001" {

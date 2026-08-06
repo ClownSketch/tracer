@@ -241,6 +241,7 @@ func (b *BatchSpanProcessor) OnEnd(span trace.SpanSnapshot) {
 	}
 }
 
+// loop 汇集入口队列中的 Span，并按数量或周期触发批量导出。
 func (b *BatchSpanProcessor) loop() {
 	defer b.loopWg.Done()
 
@@ -289,6 +290,8 @@ func (b *BatchSpanProcessor) loop() {
 	}
 }
 
+// dispatchBatch 在并发上限内异步导出一个批次。
+// @param spans []trace.SpanSnapshot 待导出的 Span 快照
 func (b *BatchSpanProcessor) dispatchBatch(spans []trace.SpanSnapshot) {
 	if len(spans) == 0 {
 		return
@@ -320,6 +323,8 @@ func (b *BatchSpanProcessor) dispatchBatch(spans []trace.SpanSnapshot) {
 	}(spans)
 }
 
+// handleExportFailure 将远端导出失败的快照转交 fallback。
+// @param spans []trace.SpanSnapshot 导出失败的 Span 快照
 func (b *BatchSpanProcessor) handleExportFailure(spans []trace.SpanSnapshot) {
 	if len(spans) == 0 {
 		return
@@ -400,6 +405,8 @@ func (b *BatchSpanProcessor) dropSpans(spans []trace.SpanSnapshot) {
 	b.droppedCount.Add(dropped)
 }
 
+// releaseSpans 释放已经完成处理的 Span 快照。
+// @param spans []trace.SpanSnapshot Span 快照集合
 func releaseSpans(spans []trace.SpanSnapshot) {
 	for _, span := range spans {
 		if span != nil {
