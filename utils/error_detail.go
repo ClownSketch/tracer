@@ -10,8 +10,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const unknownErrorCode = "unknown"
-
 // structuredError 描述 tracer 可以读取的结构化错误信息。
 // 宿主错误库只需实现这些方法，无需依赖 tracer。
 type structuredError interface {
@@ -35,7 +33,7 @@ func CreateErrorDetail(err error, customMessage string) *types.ErrorDetail {
 	var (
 		errMsg       = err.Error()                    // 获取错误消息
 		stackTrace   []types.StackFrame               // 初始化堆栈信息
-		code         = unknownErrorCode               // 初始化错误码
+		code         = tracer.ErrorCodeUnknown        // 初始化错误码
 		httpCode     = http.StatusInternalServerError // 初始化HTTP状态码
 		businessCode string                           // 初始化业务错误码
 		tipsMsg      = []string{customMessage}        // 初始化业务错误消息

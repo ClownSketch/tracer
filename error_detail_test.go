@@ -39,3 +39,14 @@ func TestCreateErrorDetailWithClownError(t *testing.T) {
 		t.Fatalf("错误堆栈记录不正确: message=%s stack=%#v", detail.Message, detail.StackTrace)
 	}
 }
+
+// TestCreateErrorDetailWithStandardError 验证普通错误使用统一的未知错误码。
+func TestCreateErrorDetailWithStandardError(t *testing.T) {
+	detail := utils.CreateErrorDetail(errors.New("unexpected failure"), "请求处理失败")
+	if detail == nil {
+		t.Fatal("普通错误应生成错误详情")
+	}
+	if detail.Code != tracer.ErrorCodeUnknown {
+		t.Fatalf("普通错误应使用未知错误码: %s", detail.Code)
+	}
+}

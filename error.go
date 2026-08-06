@@ -9,55 +9,8 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	// ==================== Tracer Core Errors ====================
-	ErrorCodeUnknown string = "unknown" // 未知错误
-
-	// ==================== Trace & Span Errors ====================
-	ErrorCodeTraceNotFound      string = "trace_not_found"      // 追踪不存在
-	ErrorCodeSpanCreationFailed string = "span_creation_failed" // Span创建失败
-	ErrorCodeSpanNotFound       string = "span_not_found"       // Span不存在
-	ErrorCodeInvalidTraceID     string = "invalid_trace_id"     // 无效的TraceID
-	ErrorCodeInvalidSpanID      string = "invalid_span_id"      // 无效的SpanID
-
-	// ==================== Context Propagation Errors ====================
-	ErrorCodeContextPropagationFailed string = "context_propagation_failed" // 上下文传播失败
-	ErrorCodeContextExtractFailed     string = "context_extract_failed"     // 上下文提取失败
-	ErrorCodeContextInjectFailed      string = "context_inject_failed"      // 上下文注入失败
-
-	// ==================== Exporter Errors ====================
-	ErrorCodeExporterNotFound       string = "exporter_not_found"       // 导出器不存在
-	ErrorCodeExporterFailed         string = "exporter_failed"          // 导出器失败
-	ErrorCodeExporterShutdownFailed string = "exporter_shutdown_failed" // 导出器关闭失败
-	ErrorCodeExportDataFailed       string = "export_data_failed"       // 数据导出失败
-
-	// ==================== Sampler Errors ====================
-	ErrorCodeSamplerNotFound     string = "sampler_not_found"     // 采样器不存在
-	ErrorCodeSamplerFailed       string = "sampler_failed"        // 采样器失败
-	ErrorCodeSamplerConfigFailed string = "sampler_config_failed" // 采样器配置失败
-
-	// ==================== Configuration Errors ====================
-	ErrorCodeInvalidConfig    string = "invalid_config"     // 无效配置
-	ErrorCodeConfigNotFound   string = "config_not_found"   // 配置不存在
-	ErrorCodeConfigLoadFailed string = "config_load_failed" // 配置加载失败
-
-	// ==================== Resource Errors ====================
-	ErrorCodeResourceNotFound     string = "resource_not_found"     // 资源不存在
-	ErrorCodeResourceCreateFailed string = "resource_create_failed" // 资源创建失败
-	ErrorCodeResourceUpdateFailed string = "resource_update_failed" // 资源更新失败
-	ErrorCodeResourceDeleteFailed string = "resource_delete_failed" // 资源删除失败
-
-	// ==================== Instrumentation Errors ====================
-	ErrorCodeInstrumentationFailed string = "instrumentation_failed" // 自动埋点失败
-	ErrorCodeMiddlewareFailed      string = "middleware_failed"      // 中间件失败
-	ErrorCodeHookFailed            string = "hook_failed"            // 钩子失败
-
-	// ==================== General Errors ====================
-	ErrorCodeInvalidParameter       string = "invalid_parameter"        // 无效参数
-	ErrorCodeTimeout                string = "timeout"                  // 超时
-	ErrorCodeConcurrentAccess       string = "concurrent_access"        // 并发访问错误
-	ErrorCodeMemoryAllocationFailed string = "memory_allocation_failed" // 内存分配失败
-)
+// ErrorCodeUnknown 表示错误没有明确分类。
+const ErrorCodeUnknown string = "unknown"
 
 // ClownError 定义错误接口
 type ClownError interface {
